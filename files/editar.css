@@ -1,0 +1,65 @@
+#main-content {
+    background-color: #2B328C !important;
+    overflow: hidden;
+}
+
+#main {
+    background-color: #2B328C !important;
+}
+
+.card-style {
+    border-radius: 0px;
+    background-color: #2B328C;
+}
+
+.card-professor {
+    width: 90%;
+    border-radius: 10px;
+}
+
+.f-sucess {
+    font-size: 24px;
+    font-family: MontserratBold;
+    padding: 10px;
+}
+
+.nome-professor {
+    font-family: MontserratBold;
+    font-size: 16px;
+    line-height: 20px;
+    color: #4F4F4F;
+}
+
+.text-agendamento {
+    font-family: MontserratBold;
+    font-size: 16px;
+    line-height: 20px;
+    color: #FFFFFF;
+}
+
+
+#toast-container > div {
+    border-radius: 0px !important;
+    max-width: 105% !important;
+}
+
+#toast-container {
+    max-width: 105% !important;
+
+}
+.toast-message{
+    padding: 10px !important;
+}
+
+.toast-top-right {
+    max-width: 105%;
+    width: 105%;
+    top: 0;
+    left: 0;
+}
+.toast-top-center {
+    max-width: 105%;
+    width: 105%;
+    top: 0;
+    left: 0;
+}
