@@ -107,6 +107,16 @@
   }
   select:focus { outline: none; border-color: var(--accent); }
 
+  input[type=color] {
+    width: 100%; height: 38px;
+    background: var(--bg);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    cursor: pointer;
+    padding: 4px;
+  }
+  input[type=color]:focus { outline: none; border-color: var(--accent); }
+
   button {
     width: 100%;
     background: var(--accent);
@@ -141,7 +151,7 @@
     background-position: 0 0, 0 11px, 11px -11px, -11px 0;
   }
   .stage .empty { color: var(--dim); font-size: 0.8rem; text-align: center; }
-  canvas { max-width: 100%; max-height: 70vh; border-radius: 2px; image-rendering: pixelated; }
+  canvas { max-width: 100%; max-height: 70vh; border-radius: 2px; }
 </style>
 </head>
 <body>
@@ -175,7 +185,40 @@
       </div>
 
       <div class="field">
-        <button id="download" disabled>Baixar imagem</button>
+        <label>Amostragem</label>
+        <select id="sampling">
+          <option value="average">Média</option>
+          <option value="dominant">Cor dominante</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <label>Dithering</label>
+        <select id="dither">
+          <option value="none">Nenhum</option>
+          <option value="bayer">Ordenado (Bayer)</option>
+          <option value="fs">Floyd-Steinberg</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <label>Níveis de cor <span class="val" id="levelsVal">8 / canal</span></label>
+        <input type="range" id="levels" min="2" max="16" value="8">
+      </div>
+
+      <div class="field">
+        <label>Espaçamento <span class="val" id="gapVal">0 %</span></label>
+        <input type="range" id="gap" min="0" max="80" value="0">
+      </div>
+
+      <div class="field">
+        <label>Cor do rejunte</label>
+        <input type="color" id="gapColor" value="#0e0e10">
+      </div>
+
+      <div class="field">
+        <button id="download" disabled>Baixar PNG</button>
+        <button id="downloadSvg" disabled style="margin-top:8px;background:transparent;color:var(--accent);border:1px solid var(--accent);">Baixar SVG</button>
       </div>
     </div>
 
@@ -191,10 +234,19 @@
   const intensity = document.getElementById('intensity');
   const intVal    = document.getElementById('intVal');
   const shape     = document.getElementById('shape');
+  const sampling  = document.getElementById('sampling');
+  const dither    = document.getElementById('dither');
+  const levels    = document.getElementById('levels');
+  const levelsVal = document.getElementById('levelsVal');
+  const gap       = document.getElementById('gap');
+  const gapVal    = document.getElementById('gapVal');
+  const gapColor  = document.getElementById('gapColor');
   const canvas    = document.getElementById('canvas');
   const ctx       = canvas.getContext('2d');
   const empty     = document.getElementById('empty');
   const downloadBtn = document.getElementById('download');
+  const downloadSvgBtn = document.getElementById('downloadSvg');
+  let lastRender = null; // guarda os dados do último render para exportar SVG
   const uploadLabel = document.getElementById('uploadLabel');
 
   let img = null;
@@ -210,6 +262,7 @@
         empty.style.display = 'none';
         canvas.style.display = 'block';
         downloadBtn.disabled = false;
+        downloadSvgBtn.disabled = false;
         render();
       };
       img.src = ev.target.result;
@@ -222,11 +275,84 @@
     if (img) render();
   });
   shape.addEventListener('change', () => { if (img) render(); });
+  sampling.addEventListener('change', () => { if (img) render(); });
+  dither.addEventListener('change', () => { if (img) render(); });
+  levels.addEventListener('input', () => {
+    levelsVal.textContent = levels.value + ' / canal';
+    if (img) render();
+  });
+  gap.addEventListener('input', () => {
+    gapVal.textContent = gap.value + ' %';
+    if (img) render();
+  });
+  gapColor.addEventListener('input', () => { if (img) render(); });
+
+  // matriz de Bayer 4x4 normalizada (valores 0..1, centrados em 0)
+  const BAYER4 = [
+    [ 0,  8,  2, 10],
+    [12,  4, 14,  6],
+    [ 3, 11,  1,  9],
+    [15,  7, 13,  5]
+  ].map(row => row.map(v => v / 16 - 0.5));
+
+  // quantiza um valor 0..255 para `n` níveis igualmente espaçados
+  function quantize(v, n) {
+    const step = 255 / (n - 1);
+    return Math.round(Math.round(v / step) * step);
+  }
+
+  // aplica dithering in-place sobre o array de blocos [r,g,b,a]
+  function applyDither(colors, cols, rows) {
+    const mode = dither.value;
+    if (mode === 'none') return;
+    const n = parseInt(levels.value, 10);
+    const step = 255 / (n - 1);
+
+    if (mode === 'bayer') {
+      for (let y = 0; y < rows; y++) {
+        for (let x = 0; x < cols; x++) {
+          const c = colors[y * cols + x];
+          const t = BAYER4[y & 3][x & 3] * step; // limiar deslocado por posição
+          for (let ch = 0; ch < 3; ch++) {
+            c[ch] = quantize(Math.min(255, Math.max(0, c[ch] + t)), n);
+          }
+        }
+      }
+    } else if (mode === 'fs') {
+      // Floyd-Steinberg: difunde o erro de quantização para vizinhos
+      const push = (x, y, ch, err, f) => {
+        if (x < 0 || x >= cols || y < 0 || y >= rows) return;
+        const c = colors[y * cols + x];
+        c[ch] = c[ch] + err * f;
+      };
+      for (let y = 0; y < rows; y++) {
+        for (let x = 0; x < cols; x++) {
+          const c = colors[y * cols + x];
+          for (let ch = 0; ch < 3; ch++) {
+            const old = Math.min(255, Math.max(0, c[ch]));
+            const nv = quantize(old, n);
+            const err = old - nv;
+            c[ch] = nv;
+            push(x + 1, y,     ch, err, 7 / 16);
+            push(x - 1, y + 1, ch, err, 3 / 16);
+            push(x,     y + 1, ch, err, 5 / 16);
+            push(x + 1, y + 1, ch, err, 1 / 16);
+          }
+        }
+      }
+      // garante que valores finais estejam em 0..255 inteiros
+      for (const c of colors) {
+        for (let ch = 0; ch < 3; ch++) {
+          c[ch] = Math.min(255, Math.max(0, Math.round(c[ch])));
+        }
+      }
+    }
+  }
 
   function render() {
     const block = parseInt(intensity.value, 10);
 
-    // limita o tamanho para manter performance
+    // resolução da amostragem (limitada para performance)
     const maxDim = 1400;
     let w = img.width, h = img.height;
     if (w > maxDim || h > maxDim) {
@@ -234,36 +360,103 @@
       w = Math.round(w * r);
       h = Math.round(h * r);
     }
-    canvas.width = w;
-    canvas.height = h;
 
-    // desenha pequeno e lê os blocos médios
     const cols = Math.max(1, Math.round(w / block));
     const rows = Math.max(1, Math.round(h / block));
-
-    const tmp = document.createElement('canvas');
-    tmp.width = cols; tmp.height = rows;
-    const tctx = tmp.getContext('2d');
-    tctx.drawImage(img, 0, 0, cols, rows);
-    const data = tctx.getImageData(0, 0, cols, rows).data;
-
-    ctx.clearRect(0, 0, w, h);
-    const cw = w / cols, ch = h / rows;
     const isCircle = shape.value === 'circle';
+    const useDominant = sampling.value === 'dominant';
+
+    // resolução de saída: garante >= 14px por célula para o rejunte ficar nítido
+    const cell = Math.max(14, Math.round(Math.max(w / cols, h / rows)));
+    const outW = cols * cell;
+    const outH = rows * cell;
+    canvas.width = outW;
+    canvas.height = outH;
+
+    let colors; // array de [r,g,b,a] por bloco, indexado y*cols+x
+
+    if (useDominant) {
+      // desenha em resolução cheia e calcula a cor mais frequente de cada bloco
+      const full = document.createElement('canvas');
+      full.width = w; full.height = h;
+      const fctx = full.getContext('2d');
+      fctx.drawImage(img, 0, 0, w, h);
+      const px = fctx.getImageData(0, 0, w, h).data;
+
+      colors = new Array(cols * rows);
+      for (let by = 0; by < rows; by++) {
+        for (let bx = 0; bx < cols; bx++) {
+          const x0 = Math.floor(bx * w / cols), x1 = Math.floor((bx + 1) * w / cols);
+          const y0 = Math.floor(by * h / rows), y1 = Math.floor((by + 1) * h / rows);
+          // por chave quantizada: contagem + soma de r,g,b para tirar a média do grupo
+          const groups = new Map();
+          let aSum = 0, aN = 0;
+          for (let y = y0; y < y1; y++) {
+            for (let x = x0; x < x1; x++) {
+              const i = (y * w + x) * 4;
+              aSum += px[i+3]; aN++;
+              // quantiza em passos de 16 para agrupar cores parecidas
+              const key = (px[i] >> 4) << 8 | (px[i+1] >> 4) << 4 | (px[i+2] >> 4);
+              let g = groups.get(key);
+              if (!g) { g = { n: 0, r: 0, gr: 0, b: 0 }; groups.set(key, g); }
+              g.n++; g.r += px[i]; g.gr += px[i+1]; g.b += px[i+2];
+            }
+          }
+          // escolhe o grupo mais frequente e usa a média de cor dele
+          let best = null;
+          for (const g of groups.values()) {
+            if (!best || g.n > best.n) best = g;
+          }
+          colors[by * cols + bx] = best
+            ? [Math.round(best.r/best.n), Math.round(best.gr/best.n), Math.round(best.b/best.n), aN ? aSum/aN : 255]
+            : [0,0,0,0];
+        }
+      }
+    } else {
+      // média: redimensiona para a grade e lê os pixels resultantes
+      const tmp = document.createElement('canvas');
+      tmp.width = cols; tmp.height = rows;
+      const tctx = tmp.getContext('2d');
+      tctx.drawImage(img, 0, 0, cols, rows);
+      const data = tctx.getImageData(0, 0, cols, rows).data;
+      colors = new Array(cols * rows);
+      for (let k = 0; k < cols * rows; k++) {
+        const i = k * 4;
+        colors[k] = [data[i], data[i+1], data[i+2], data[i+3]];
+      }
+    }
+
+    // --- dithering: aplicado sobre a grade de blocos já amostrada ---
+    applyDither(colors, cols, rows);
+
+    ctx.clearRect(0, 0, outW, outH);
+    const gapPct = parseInt(gap.value, 10) / 100;
+    const scale = 1 - gapPct; // fração da célula ocupada pelo pixel
+
+    // pinta o rejunte como fundo quando há espaçamento
+    if (gapPct > 0) {
+      ctx.fillStyle = gapColor.value;
+      ctx.fillRect(0, 0, outW, outH);
+    }
 
     for (let y = 0; y < rows; y++) {
       for (let x = 0; x < cols; x++) {
-        const i = (y * cols + x) * 4;
-        ctx.fillStyle = `rgba(${data[i]},${data[i+1]},${data[i+2]},${data[i+3]/255})`;
+        const c = colors[y * cols + x];
+        ctx.fillStyle = `rgba(${c[0]},${c[1]},${c[2]},${c[3]/255})`;
+        const cx = x*cell + cell/2, cy = y*cell + cell/2;
         if (isCircle) {
           ctx.beginPath();
-          ctx.arc(x*cw + cw/2, y*ch + ch/2, Math.min(cw, ch)/2, 0, Math.PI*2);
+          ctx.arc(cx, cy, cell/2 * scale, 0, Math.PI*2);
           ctx.fill();
         } else {
-          ctx.fillRect(Math.floor(x*cw), Math.floor(y*ch), Math.ceil(cw), Math.ceil(ch));
+          const side = cell * scale;
+          ctx.fillRect(cx - side/2, cy - side/2, side, side);
         }
       }
     }
+    // guarda o que foi desenhado para permitir exportar SVG
+    lastRender = { colors, cols, rows, cell, outW, outH, scale, gapPct,
+                   isCircle, gapColor: gapColor.value };
   }
 
   downloadBtn.addEventListener('click', () => {
@@ -271,6 +464,46 @@
     a.download = 'pixelado.png';
     a.href = canvas.toDataURL('image/png');
     a.click();
+  });
+
+  function buildSvg(r) {
+    const parts = [];
+    parts.push(`<svg xmlns="http://www.w3.org/2000/svg" width="${r.outW}" height="${r.outH}" viewBox="0 0 ${r.outW} ${r.outH}">`);
+    // fundo de rejunte quando há espaçamento
+    if (r.gapPct > 0) {
+      parts.push(`<rect width="${r.outW}" height="${r.outH}" fill="${r.gapColor}"/>`);
+    }
+    const round = n => Math.round(n * 100) / 100; // limita casas decimais
+    for (let y = 0; y < r.rows; y++) {
+      for (let x = 0; x < r.cols; x++) {
+        const c = r.colors[y * r.cols + x];
+        const a = c[3] / 255;
+        if (a === 0) continue; // pula blocos totalmente transparentes
+        const fill = `rgb(${c[0]},${c[1]},${c[2]})`;
+        const op = a < 1 ? ` fill-opacity="${round(a)}"` : '';
+        const cx = x * r.cell + r.cell / 2, cy = y * r.cell + r.cell / 2;
+        if (r.isCircle) {
+          parts.push(`<circle cx="${round(cx)}" cy="${round(cy)}" r="${round(r.cell/2*r.scale)}" fill="${fill}"${op}/>`);
+        } else {
+          const side = r.cell * r.scale;
+          parts.push(`<rect x="${round(cx-side/2)}" y="${round(cy-side/2)}" width="${round(side)}" height="${round(side)}" fill="${fill}"${op}/>`);
+        }
+      }
+    }
+    parts.push('</svg>');
+    return parts.join('');
+  }
+
+  downloadSvgBtn.addEventListener('click', () => {
+    if (!lastRender) return;
+    const svg = buildSvg(lastRender);
+    const blob = new Blob([svg], { type: 'image/svg+xml' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.download = 'pixelado.svg';
+    a.href = url;
+    a.click();
+    URL.revokeObjectURL(url);
   });
 </script>
 </body>
