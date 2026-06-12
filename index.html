@@ -11,30 +11,49 @@
       height: 100%;
       background: #000;
       overflow: hidden;
-      font-family: monospace;
     }
-    canvas {
-      display: block;
-      background: #000;
-    }
+    canvas { display: block; }
   </style>
 </head>
 <body>
-  <canvas id="canvas"></canvas>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
   <script>
-    const canvas = document.getElementById('canvas');
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
-    const ctx = canvas.getContext('2d');
+    // Setup Three.js
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
 
-    const centerX = canvas.width / 2;
-    const centerY = canvas.height / 2;
-    const ringCount = 40;
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setClearColor(0x000000);
+    document.body.appendChild(renderer.domElement);
+
+    camera.position.z = 0;
+
+    // Criar buraco de minhoca
+    const rings = [];
+    const ringCount = 50;
     const segmentsPerRing = 128;
 
-    let time = 0;
+    for (let i = 0; i < ringCount; i++) {
+      const points = [];
+      const zPos = (i - ringCount / 2) * 0.8;
+      const radius = 1 + (i / ringCount) * 4;
 
-    // Desenho com mouse/touch
+      for (let j = 0; j <= segmentsPerRing; j++) {
+        const angle = (j / segmentsPerRing) * Math.PI * 2;
+        const x = Math.cos(angle) * radius;
+        const y = Math.sin(angle) * radius;
+        points.push(new THREE.Vector3(x, y, zPos));
+      }
+
+      const geometry = new THREE.BufferGeometry().setFromPoints(points);
+      const material = new THREE.LineBasicMaterial({ color: 0x00ffff });
+      const line = new THREE.Line(geometry, material);
+      scene.add(line);
+      rings.push({ line, initialZ: zPos });
+    }
+
+    // Gesture recognition
     let isDrawing = false;
     let lastX = 0, lastY = 0;
     let strokePoints = [];
@@ -60,7 +79,6 @@
     function recognize(normalized) {
       if (!normalized || normalized.length < 5) return null;
 
-      // Detectar curvatura
       let curveScore = 0;
       for (let i = 1; i < normalized.length - 1; i++) {
         const dx = normalized[i + 1].x - normalized[i].x;
@@ -81,12 +99,10 @@
       const maxW = Math.max(...widths);
       const isWide = (maxW - minW) > 0.5;
 
-      // P: curva + vertical, começando à esquerda
       if (curveScore > 0.06 && isVertical && normalized[0].x < 0.4) {
         return 'P';
       }
 
-      // W: múltiplas ondas, bem amplo
       if (curveScore > 0.12 && isWide && isVertical) {
         return 'W';
       }
@@ -94,7 +110,18 @@
       return null;
     }
 
-    canvas.addEventListener('mousedown', (e) => {
+    function handleGesture() {
+      const normalized = normalizeStroke(strokePoints);
+      const char = recognize(normalized);
+
+      if (char === 'P') {
+        window.location.href = 'pixel-lab.html';
+      } else if (char === 'W') {
+        window.location.href = 'simulador-wb-xt30ii.html';
+      }
+    }
+
+    renderer.domElement.addEventListener('mousedown', (e) => {
       isDrawing = true;
       strokePoints = [];
       lastX = e.clientX;
@@ -102,7 +129,7 @@
       strokePoints.push({ x: lastX, y: lastY });
     });
 
-    canvas.addEventListener('mousemove', (e) => {
+    renderer.domElement.addEventListener('mousemove', (e) => {
       if (!isDrawing) return;
       const x = e.clientX;
       const y = e.clientY;
@@ -115,22 +142,14 @@
       }
     });
 
-    canvas.addEventListener('mouseup', () => {
+    renderer.domElement.addEventListener('mouseup', () => {
       if (!isDrawing) return;
       isDrawing = false;
-
-      const normalized = normalizeStroke(strokePoints);
-      const char = recognize(normalized);
-
-      if (char === 'P') {
-        window.location.href = 'pixel-lab.html';
-      } else if (char === 'W') {
-        window.location.href = 'simulador-wb-xt30ii.html';
-      }
+      handleGesture();
       strokePoints = [];
     });
 
-    canvas.addEventListener('touchstart', (e) => {
+    renderer.domElement.addEventListener('touchstart', (e) => {
       const touch = e.touches[0];
       isDrawing = true;
       strokePoints = [];
@@ -139,7 +158,7 @@
       strokePoints.push({ x: lastX, y: lastY });
     });
 
-    canvas.addEventListener('touchmove', (e) => {
+    renderer.domElement.addEventListener('touchmove', (e) => {
       if (!isDrawing) return;
       e.preventDefault();
       const touch = e.touches[0];
@@ -154,67 +173,37 @@
       }
     });
 
-    canvas.addEventListener('touchend', () => {
+    renderer.domElement.addEventListener('touchend', () => {
       if (!isDrawing) return;
       isDrawing = false;
-
-      const normalized = normalizeStroke(strokePoints);
-      const char = recognize(normalized);
-
-      if (char === 'P') {
-        window.location.href = 'pixel-lab.html';
-      } else if (char === 'W') {
-        window.location.href = 'simulador-wb-xt30ii.html';
-      }
+      handleGesture();
       strokePoints = [];
     });
 
     window.addEventListener('resize', () => {
-      canvas.width = window.innerWidth;
-      canvas.height = window.innerHeight;
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
     });
 
-    function drawWormhole() {
-      ctx.fillStyle = '#000';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
+    // Animation loop
+    function animate() {
+      requestAnimationFrame(animate);
 
-      ctx.strokeStyle = '#00ffff';
-      ctx.lineWidth = 1;
+      const time = Date.now() * 0.0008;
 
-      for (let i = 0; i < ringCount; i++) {
-        const z = (i + time * 12) % ringCount;
-        const depth = (z / ringCount);
+      rings.forEach((item) => {
+        item.line.position.z = item.initialZ + time * 20;
 
-        // Raio cresce para quem vem de trás para frente
-        const maxRadius = Math.min(canvas.width, canvas.height) * 0.4;
-        const baseRadius = maxRadius * (0.2 + depth * 0.8);
-
-        // Opacidade maior na frente
-        const opacity = Math.max(0.15, depth);
-        ctx.globalAlpha = opacity;
-
-        ctx.beginPath();
-
-        for (let j = 0; j <= segmentsPerRing; j++) {
-          const angle = (j / segmentsPerRing) * Math.PI * 2;
-          const x = centerX + Math.cos(angle) * baseRadius;
-          const y = centerY + Math.sin(angle) * baseRadius;
-
-          if (j === 0) ctx.moveTo(x, y);
-          else ctx.lineTo(x, y);
+        if (item.line.position.z > 50) {
+          item.line.position.z -= ringCount * 0.8;
         }
 
-        ctx.closePath();
-        ctx.stroke();
-      }
+        const opacity = 0.2 + 0.8 * Math.abs(Math.sin(item.line.position.z * 0.1));
+        item.line.material.opacity = opacity;
+      });
 
-      ctx.globalAlpha = 1;
-    }
-
-    function animate() {
-      time += 0.016; // ~60fps
-      drawWormhole();
-      requestAnimationFrame(animate);
+      renderer.render(scene, camera);
     }
 
     animate();
