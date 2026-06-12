@@ -18,9 +18,11 @@
 <body>
   <script src="three.min.js"></script>
   <script>
+    const clamp = THREE.MathUtils.clamp;
+    const TWO_PI = Math.PI * 2;
+
     const scene = new THREE.Scene();
-    // Fog hides the far folds of the loop so you only ever see the continuous
-    // corridor ahead -> reads as endless depth, no detached pieces floating.
+    // Fog hides the far end of the generated path -> endless depth.
     scene.fog = new THREE.FogExp2(0x000000, 0.05);
 
     const camera = new THREE.PerspectiveCamera(90, window.innerWidth / window.innerHeight, 0.1, 1000);
@@ -32,97 +34,152 @@
     renderer.setClearColor(0x000000);
     document.body.appendChild(renderer.domElement);
 
-    // ---------- tunnel path (closed loop = truly infinite, never restarts) ----------
-    // Large-scale winding loop: a wide base ring (R0) so the tunnel never folds
-    // back onto itself within view distance, plus strong sine terms for very
-    // sinuous, sharply curving turns. Tuned so the nearest non-local fold sits
-    // ~85 units away -> hidden by fog, leaving only the continuous corridor ahead.
-    const CTRL_POINTS = 40;
-    const R0 = 340;
-    const pathPoints = [];
-    for (let i = 0; i < CTRL_POINTS; i++) {
-      const a = (i / CTRL_POINTS) * Math.PI * 2;
-      const x = Math.cos(a) * R0 + Math.sin(a * 3) * 80 + Math.cos(a * 5) * 45;
-      const y = Math.sin(a) * R0 + Math.cos(a * 3) * 80 + Math.sin(a * 5) * 45;
-      const z = Math.sin(a * 1.5) * 120 + Math.cos(a * 2.5) * 70;
-      pathPoints.push(new THREE.Vector3(x, y, z));
+    // ---------- tunnel parameters ----------
+    const RING_COUNT  = 140;  // centreline points held in the sliding window
+    const RADIAL      = 28;   // segments around each ring
+    const TUBE_RADIUS = 11;   // wide enough to clearly fly *inside* the corridor
+    const STEP        = 8;    // distance between consecutive ring centres
+    const CAM_INDEX   = 10;   // rings kept behind the camera
+    const LOOK_AHEAD  = 5;    // rings ahead the camera aims toward
+    const MOVE_SPEED  = 3;    // world units per frame
+
+    // ---------- generative heading (smoothed random walk = random but continuous) ----------
+    // The direction is never pre-defined: each new ring nudges the turn rate by a
+    // little randomness, damped so it can't spiral into itself, clamped so turns
+    // stay sharp but bounded. Result: an endless, never-repeating sinuous path.
+    const TURN_ACCEL = 0.03;  // randomness injected into the turn rate per ring
+    const TURN_DAMP  = 0.92;  // pulls the turn rate back toward 0 (no tight spirals)
+    const TURN_MAX   = 0.20;  // max radians turned per ring (sharpness of curves)
+
+    let yaw = Math.PI / 2, pitch = 0, yawRate = 0, pitchRate = 0;
+    const _dir = new THREE.Vector3();
+    function nextDir() {
+      yawRate   = clamp((yawRate   + (Math.random() - 0.5) * TURN_ACCEL) * TURN_DAMP, -TURN_MAX, TURN_MAX);
+      pitchRate = clamp((pitchRate + (Math.random() - 0.5) * TURN_ACCEL) * TURN_DAMP, -TURN_MAX, TURN_MAX);
+      yaw  += yawRate;
+      pitch = clamp(pitch + pitchRate, -1.2, 1.2);
+      return _dir.set(
+        Math.cos(pitch) * Math.cos(yaw),
+        Math.sin(pitch),
+        Math.cos(pitch) * Math.sin(yaw)
+      ).clone();
     }
 
-    // closed=true makes the loop seamless; tension 0.5 keeps the turns tight and winding.
-    const curve = new THREE.CatmullRomCurve3(pathPoints, true, 'catmullrom', 0.5);
-    const CURVE_LENGTH = curve.getLength();
+    // ---------- sliding-window state ----------
+    const pts = [];   // ring centres        (THREE.Vector3)
+    const tans = [];  // tangents            (THREE.Vector3)
+    const nors = [];  // normals  (parallel-transported, no twist)
+    const bins = [];  // binormals
+    const hues = [];  // hue per ring
+    let ringCounter = 0;
 
-    // ---------- tube geometry built as clean rings + rails ----------
-    const TUBULAR = 1400;  // rings along the length (dense -> smooth over long curve)
-    const RADIAL = 28;     // segments around each ring
-    const TUBE_RADIUS = 14.0; // wide enough to clearly fly *inside* the corridor
+    function hueFor(n) { return (0.55 + n * 0.004) % 1; }
 
-    const frames = curve.computeFrenetFrames(TUBULAR, true);
-    const positions = [];
-    const colors = [];
-    const color = new THREE.Color();
-
-    const P = new THREE.Vector3();
-    for (let i = 0; i <= TUBULAR; i++) {
-      const u = i / TUBULAR;
-      curve.getPointAt(u % 1, P);
-      const N = frames.normals[i % TUBULAR];
-      const B = frames.binormals[i % TUBULAR];
-
-      // colour band sweeping along the tunnel (cyan / magenta / violet range)
-      const hue = (0.55 + u * 1.5) % 1;
-      color.setHSL(hue, 1.0, 0.55);
-
-      for (let j = 0; j < RADIAL; j++) {
-        const v = (j / RADIAL) * Math.PI * 2;
-        const cx = Math.cos(v), sy = Math.sin(v);
-        const x = P.x + TUBE_RADIUS * (cx * N.x + sy * B.x);
-        const y = P.y + TUBE_RADIUS * (cx * N.y + sy * B.y);
-        const z = P.z + TUBE_RADIUS * (cx * N.z + sy * B.z);
-        positions.push(x, y, z);
-        colors.push(color.r, color.g, color.b);
+    // Minimal-rotation parallel transport: carry a normal from one tangent to the
+    // next so the tube never twists, even as the window regenerates.
+    const _axis = new THREE.Vector3();
+    function transport(n, t0, t1) {
+      _axis.crossVectors(t0, t1);
+      const len = _axis.length();
+      const out = n.clone();
+      if (len > 1e-6) {
+        _axis.divideScalar(len);
+        out.applyAxisAngle(_axis, Math.acos(clamp(t0.dot(t1), -1, 1)));
       }
+      return out.addScaledVector(t1, -out.dot(t1)).normalize();
     }
 
+    // build the initial window
+    (function initPath() {
+      let cur = new THREE.Vector3(0, 0, 0);
+      pts.push(cur.clone());
+      for (let i = 1; i < RING_COUNT; i++) {
+        cur = cur.clone().addScaledVector(nextDir(), STEP);
+        pts.push(cur);
+      }
+      for (let i = 0; i < RING_COUNT; i++) {
+        const t = (i < RING_COUNT - 1) ? pts[i + 1].clone().sub(pts[i])
+                                       : pts[i].clone().sub(pts[i - 1]);
+        tans.push(t.normalize());
+      }
+      let n0 = new THREE.Vector3(0, 1, 0);
+      if (Math.abs(tans[0].dot(n0)) > 0.9) n0.set(1, 0, 0);
+      nors[0] = n0.crossVectors(tans[0], n0).normalize();
+      bins[0] = new THREE.Vector3().crossVectors(tans[0], nors[0]).normalize();
+      for (let i = 1; i < RING_COUNT; i++) {
+        nors[i] = transport(nors[i - 1], tans[i - 1], tans[i]);
+        bins[i] = new THREE.Vector3().crossVectors(tans[i], nors[i]).normalize();
+      }
+      for (let i = 0; i < RING_COUNT; i++) hues.push(hueFor(ringCounter++));
+    })();
+
+    // recycle the oldest ring and generate a fresh one ahead
+    const _off = new THREE.Vector3();
+    function advanceWindow() {
+      pts.shift(); tans.shift(); nors.shift(); bins.shift(); hues.shift();
+
+      // re-centre so coordinates stay bounded (whole scene + camera shift together)
+      _off.copy(pts[0]);
+      for (let i = 0; i < pts.length; i++) pts[i].sub(_off);
+
+      const newP = pts[pts.length - 1].clone().addScaledVector(nextDir(), STEP);
+      pts.push(newP);
+
+      const L = pts.length;                       // back to RING_COUNT
+      tans[L - 2] = pts[L - 1].clone().sub(pts[L - 2]).normalize();
+      tans.push(tans[L - 2].clone());
+      nors.push(transport(nors[L - 2], tans[L - 2], tans[L - 1]));
+      bins.push(new THREE.Vector3().crossVectors(tans[L - 1], nors[L - 1]).normalize());
+      hues.push(hueFor(ringCounter++));
+    }
+
+    // ---------- geometry (clean rings + longitudinal rails) ----------
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(RING_COUNT * RADIAL * 3), 3));
+    geo.setAttribute('color',    new THREE.BufferAttribute(new Float32Array(RING_COUNT * RADIAL * 3), 3));
     const idx = [];
-    for (let i = 0; i <= TUBULAR; i++) {
+    for (let i = 0; i < RING_COUNT; i++) {
       for (let j = 0; j < RADIAL; j++) {
         const cur = i * RADIAL + j;
-        const nextJ = i * RADIAL + (j + 1) % RADIAL;
-        idx.push(cur, nextJ);                       // radial ring
-        if (i < TUBULAR) idx.push(cur, cur + RADIAL); // longitudinal rail
+        idx.push(cur, i * RADIAL + (j + 1) % RADIAL);     // radial ring
+        if (i < RING_COUNT - 1) idx.push(cur, cur + RADIAL); // longitudinal rail
       }
     }
-
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-    geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
     geo.setIndex(idx);
 
     const mat = new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.9, fog: true });
     const tunnel = new THREE.LineSegments(geo, mat);
     scene.add(tunnel);
 
-    // ---------- camera travel along the curve ----------
-    let travel = 0;                 // 0..1 position along the closed loop
-    const MOVE_SPEED = 6;           // world units per frame
-    const tStep = MOVE_SPEED / CURVE_LENGTH;
-
-    const camPos = new THREE.Vector3();
-    const lookPos = new THREE.Vector3();
-    const tangent = new THREE.Vector3();
+    const color = new THREE.Color();
+    function rebuildGeometry() {
+      const pos = geo.attributes.position.array;
+      const col = geo.attributes.color.array;
+      for (let i = 0; i < RING_COUNT; i++) {
+        const P = pts[i], N = nors[i], B = bins[i];
+        color.setHSL(hues[i], 1.0, 0.55);
+        for (let j = 0; j < RADIAL; j++) {
+          const v = (j / RADIAL) * TWO_PI, cx = Math.cos(v), sy = Math.sin(v);
+          const k = (i * RADIAL + j) * 3;
+          pos[k]     = P.x + TUBE_RADIUS * (cx * N.x + sy * B.x);
+          pos[k + 1] = P.y + TUBE_RADIUS * (cx * N.y + sy * B.y);
+          pos[k + 2] = P.z + TUBE_RADIUS * (cx * N.z + sy * B.z);
+          col[k] = color.r; col[k + 1] = color.g; col[k + 2] = color.b;
+        }
+      }
+      geo.attributes.position.needsUpdate = true;
+      geo.attributes.color.needsUpdate = true;
+    }
+    rebuildGeometry();
 
     // ---------- interactive distortion (camera-side, cheap) ----------
-    let distortion = 0;             // current 0..1
-    let targetDistortion = 0;
-    let lastInput = -10000;
+    let distortion = 0, targetDistortion = 0, lastInput = -10000;
     const DISTORTION_DURATION = 600;
-
-    function pulse(strength) { targetDistortion = strength; lastInput = Date.now(); }
-    renderer.domElement.addEventListener('mousedown', () => pulse(0.8));
-    renderer.domElement.addEventListener('mousemove', (e) => { if (e.buttons) pulse(0.9); });
-    renderer.domElement.addEventListener('touchstart', () => pulse(0.8), { passive: true });
-    renderer.domElement.addEventListener('touchmove', () => pulse(0.9), { passive: true });
+    function impulse(s) { targetDistortion = s; lastInput = Date.now(); }
+    renderer.domElement.addEventListener('mousedown', () => impulse(0.8));
+    renderer.domElement.addEventListener('mousemove', (e) => { if (e.buttons) impulse(0.9); });
+    renderer.domElement.addEventListener('touchstart', () => impulse(0.8), { passive: true });
+    renderer.domElement.addEventListener('touchmove', () => impulse(0.9), { passive: true });
 
     // ---------- gyroscope ----------
     let gyroX = 0, gyroY = 0;
@@ -140,25 +197,30 @@
     });
 
     // ---------- animation ----------
-    let roll = 0;
+    let dist = 0, roll = 0;
+    const camPos = new THREE.Vector3();
+    const lookPos = new THREE.Vector3();
 
     function animate() {
       requestAnimationFrame(animate);
 
-      // advance, wrapping around the closed loop -> never ends, never restarts visibly
-      travel = (travel + tStep) % 1;
+      dist += MOVE_SPEED;
+      while (dist >= STEP) {           // recycle rings as we travel -> infinite tunnel
+        advanceWindow();
+        rebuildGeometry();
+        dist -= STEP;
+      }
+      const f = dist / STEP;
 
-      // place camera on the centreline, looking a little further down the path
-      curve.getPointAt(travel, camPos);
-      curve.getTangentAt(travel, tangent);
-      lookPos.copy(camPos).add(tangent);
+      // glide smoothly between ring centres
+      camPos.lerpVectors(pts[CAM_INDEX], pts[CAM_INDEX + 1], f);
+      lookPos.lerpVectors(pts[CAM_INDEX + LOOK_AHEAD], pts[CAM_INDEX + LOOK_AHEAD + 1], f);
 
       // distortion easing
       const since = Date.now() - lastInput;
       if (since < DISTORTION_DURATION) {
-        const progress = since / DISTORTION_DURATION;
-        const easing = 1 - Math.pow(1 - progress, 3);
-        distortion = targetDistortion * (1 - easing);
+        const p = since / DISTORTION_DURATION;
+        distortion = targetDistortion * Math.pow(1 - p, 3);
       } else {
         distortion = 0;
       }
@@ -166,15 +228,12 @@
       camera.position.copy(camPos);
       camera.lookAt(lookPos);
 
-      // barrel-roll spin + extra spin while distorting
-      roll += 0.004 + distortion * 0.05;
+      roll += 0.004 + distortion * 0.05;     // barrel-roll spin
       camera.rotateZ(roll);
 
-      // lateral pan from gyroscope (in camera-local space)
-      camera.translateX(gyroY * 0.4);
+      camera.translateX(gyroY * 0.4);        // lateral pan from gyroscope
       camera.translateY(gyroX * 0.4);
 
-      // FOV punch + speed-wobble on interaction
       camera.fov = BASE_FOV + Math.sin(Date.now() * 0.02) * distortion * 12;
       camera.updateProjectionMatrix();
 
