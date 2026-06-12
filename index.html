@@ -91,20 +91,42 @@
     const tunnel = new THREE.LineSegments(geo, mat);
     scene.add(tunnel);
 
-    // ---------- color wave animation ----------
+    // ---------- color wave + distortion animation ----------
     let colorWaveOffset = 0;
+    let distortionAmount = 0;
+    let targetDistortionAmount = 0;
+    let lastMovementTime = 0;
+    const DISTORTION_DECAY_DURATION = 500; // ms
 
     function updateTunnelEffects() {
+      const pos_arr = geo.attributes.position.array;
       const colors_arr = geo.attributes.color.array;
 
       for (let i = 0; i < RINGS; i++) {
+        const z = -i * SPACING;
         const depth = i / RINGS;
 
         // Onda de cor psicadélica
         const hueShift = (depth + colorWaveOffset * 0.5 + i * 0.02) % 1;
 
+        // Distorção suave do túnel
+        const distortionFreq = 4;
+        const distortWave = Math.sin(i * 0.08 + distortionAmount * 2) * distortionAmount;
+
         for (let j = 0; j < SEG; j++) {
           const vertexIdx = (i * SEG + j) * 3;
+
+          // Aplicar distorção à posição
+          const angle = (j / SEG) * Math.PI * 2;
+          const radiusScale = 1 + distortWave * Math.sin(angle * distortionFreq);
+
+          const dx = Math.cos(angle) * RADIUS * radiusScale;
+          const dy = Math.sin(angle) * RADIUS * radiusScale;
+
+          // Atualizar posição com distorção
+          pos_arr[vertexIdx] = dx + Math.sin(i * 0.03) * 4;
+          pos_arr[vertexIdx + 1] = dy + Math.cos(i * 0.025) * 3;
+          pos_arr[vertexIdx + 2] = z;
 
           // Cores psicadélicas dinâmicas
           const hue = (0.55 + hueShift * 0.5) % 1;
@@ -117,18 +139,15 @@
           colors_arr[vertexIdx + 2] = c.b;
         }
       }
+      geo.attributes.position.needsUpdate = true;
       geo.attributes.color.needsUpdate = true;
     }
 
-    // ---------- acelerômetro/movimento abrupto ----------
+    // ---------- acelerômetro/distorção ----------
     let lastAccelX = 0;
     let lastAccelY = 0;
     let lastAccelZ = 0;
-    let accelHistory = [];
-    const ACCEL_HISTORY_SIZE = 20;
-    const MOVEMENT_THRESHOLD = 35; // m/s² - movimento abrupto
-    const NAVIGATION_COOLDOWN = 2000; // 2 segundos entre navegações
-    let lastNavigationTime = 0;
+    const MOVEMENT_THRESHOLD = 15; // m/s² - para disparar distorção
 
     if (window.DeviceMotionEvent) {
       window.addEventListener('devicemotion', (e) => {
@@ -142,27 +161,10 @@
         // Calcular magnitude da aceleração
         const magnitude = Math.sqrt(ax * ax + ay * ay + az * az);
 
-        // Manter histórico
-        accelHistory.push({ x: ax, y: ay, z: az, mag: magnitude, time: Date.now() });
-        if (accelHistory.length > ACCEL_HISTORY_SIZE) accelHistory.shift();
-
-        // Detectar movimento abrupto
+        // Movimento detectado - aplicar distorção
         if (magnitude > MOVEMENT_THRESHOLD) {
-          const now = Date.now();
-          if (now - lastNavigationTime > NAVIGATION_COOLDOWN) {
-            // Movimento para direita (+X) -> WB
-            if (ax > 20) {
-              console.log('Rapid right movement - navigate to WB');
-              lastNavigationTime = now;
-              window.location.href = 'wb-simulator.html';
-            }
-            // Movimento para esquerda (-X) -> Pixel Lab
-            else if (ax < -20) {
-              console.log('Rapid left movement - navigate to Pixel Lab');
-              lastNavigationTime = now;
-              window.location.href = 'pixel-lab.html';
-            }
-          }
+          targetDistortionAmount = Math.min(1, magnitude / 50); // Normalizar para 0-1
+          lastMovementTime = Date.now();
         }
 
         lastAccelX = ax;
@@ -216,6 +218,26 @@
       // Animação contínua de cores
       const baseWave = Math.sin(performance.now() * 0.0003) * 0.1;
       colorWaveOffset = baseWave;
+
+      // Animação de distorção: interpolação suave para voltar ao normal
+      const now = Date.now();
+      const timeSinceMovement = now - lastMovementTime;
+
+      if (timeSinceMovement < DISTORTION_DECAY_DURATION) {
+        // Ainda está no período de decay - interpolar para 0
+        const progress = timeSinceMovement / DISTORTION_DECAY_DURATION;
+        distortionAmount = targetDistortionAmount * (1 - progress);
+      } else {
+        // Além do decay time - manter em 0
+        distortionAmount = 0;
+      }
+
+      // Suavizar transições (easing)
+      const easing = 1 - Math.pow(1 - Math.min(1, timeSinceMovement / DISTORTION_DECAY_DURATION), 3);
+      if (timeSinceMovement < DISTORTION_DECAY_DURATION) {
+        distortionAmount = targetDistortionAmount * (1 - easing);
+      }
+
       updateTunnelEffects();
 
       renderer.render(scene, camera);
