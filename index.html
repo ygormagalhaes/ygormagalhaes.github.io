@@ -33,52 +33,60 @@
     renderer.shadowMap.enabled = true;
     document.body.appendChild(renderer.domElement);
 
-    // ---------- tunnel mesh with distortion ----------
-    const RINGS = 300; // aumentado para seamless
+    // ---------- tunnel mesh with sliding window ----------
+    const VISIBLE_RINGS = 100; // quantos anéis manter visíveis
     const SEG = 96;
     const SPACING = 1.8;
     const RADIUS = 6.5;
 
     const positions = [];
     const colors = [];
-    const originalPositions = [];
     const color = new THREE.Color();
 
-    for (let i = 0; i < RINGS; i++) {
-      const z = -i * SPACING;
+    function generateRingGeometry(ringIndex) {
+      // Gera geometria de um anel específico da trajetória infinita
+      const z = ringIndex * SPACING; // sem negativo - será ajustado depois
 
-      // Curvas sinuosas muito mais agressivas - tobogã real!
-      const mainCurveX = Math.sin(i * 0.08) * 6 + Math.sin(i * 0.02) * 4;
-      const mainCurveY = Math.cos(i * 0.06) * 5 + Math.sin(i * 0.03) * 4 + Math.cos(i * 0.01) * 3;
+      const mainCurveX = Math.sin(ringIndex * 0.08) * 6 + Math.sin(ringIndex * 0.02) * 4;
+      const mainCurveY = Math.cos(ringIndex * 0.06) * 5 + Math.sin(ringIndex * 0.03) * 4 + Math.cos(ringIndex * 0.01) * 3;
 
-      // Loops - oscilações rápidas para criar efeito de looping
-      const loopX = Math.sin(i * 0.15) * 2;
-      const loopY = Math.cos(i * 0.12) * 2;
+      const loopX = Math.sin(ringIndex * 0.15) * 2;
+      const loopY = Math.cos(ringIndex * 0.12) * 2;
+
+      const verts = [];
+      const cols = [];
 
       for (let j = 0; j < SEG; j++) {
         const a = (j / SEG) * Math.PI * 2;
         const x = Math.cos(a) * RADIUS + mainCurveX + loopX;
         const y = Math.sin(a) * RADIUS + mainCurveY + loopY;
-        positions.push(x, y, z);
-        originalPositions.push(x, y, z);
+        verts.push(x, y, z);
 
-        // Cores mais vibrantes e psicadélicas
-        const t = i / RINGS;
-        const hue = 0.5 + t * 0.4;
+        const hue = 0.5 + (ringIndex % 100) * 0.004;
         const sat = 1.2;
-        const light = 0.3 + (1 - t) * 0.5;
+        const light = 0.4;
         color.setHSL(hue % 1, Math.min(1, sat), light);
-        colors.push(color.r, color.g, color.b);
+        cols.push(color.r, color.g, color.b);
       }
+
+      return { verts, cols };
+    }
+
+    // Gerar anéis iniciais
+    let ringStartIndex = 0;
+    for (let i = 0; i < VISIBLE_RINGS; i++) {
+      const ring = generateRingGeometry(i);
+      positions.push(...ring.verts);
+      colors.push(...ring.cols);
     }
 
     const idx = [];
-    for (let i = 0; i < RINGS; i++) {
+    for (let i = 0; i < VISIBLE_RINGS; i++) {
       for (let j = 0; j < SEG; j++) {
         const cur = i * SEG + j;
         const nextJ = i * SEG + (j + 1) % SEG;
         idx.push(cur, nextJ);
-        if (i < RINGS - 1) idx.push(cur, cur + SEG);
+        if (i < VISIBLE_RINGS - 1) idx.push(cur, cur + SEG);
       }
     }
 
@@ -221,7 +229,35 @@
 
     // ---------- animation loop @ 60fps ----------
     const SPEED = 1.2; // velocidade rápida de voo (tobogã)
-    let cameraZGlobal = 0; // posição global para tracking contínuo
+    const UPDATE_THRESHOLD = SPACING * 2; // atualizar a cada 2 anéis de distância
+    let cameraZAccum = 0; // acumulador de distância para atualização
+    let ringStartIndex = 0;
+
+    function updateTunnelGeometry() {
+      // Atualizar os vértices e cores da geometria sliding window
+      const positions_arr = geo.attributes.position.array;
+      const colors_arr = geo.attributes.color.array;
+
+      for (let i = 0; i < VISIBLE_RINGS; i++) {
+        const ring = generateRingGeometry(ringStartIndex + i);
+        const verts = ring.verts;
+        const cols = ring.cols;
+
+        for (let j = 0; j < SEG; j++) {
+          const vertexIdx = (i * SEG + j) * 3;
+          positions_arr[vertexIdx] = verts[j * 3];
+          positions_arr[vertexIdx + 1] = verts[j * 3 + 1];
+          positions_arr[vertexIdx + 2] = verts[j * 3 + 2] - cameraZAccum; // offset da câmera
+
+          colors_arr[vertexIdx] = cols[j * 3];
+          colors_arr[vertexIdx + 1] = cols[j * 3 + 1];
+          colors_arr[vertexIdx + 2] = cols[j * 3 + 2];
+        }
+      }
+
+      geo.attributes.position.needsUpdate = true;
+      geo.attributes.color.needsUpdate = true;
+    }
 
     function animate() {
       requestAnimationFrame(animate);
@@ -230,17 +266,21 @@
       // com leve influência do giroscópio
       camera.position.x = gyroY * 0.3;
       camera.position.y = gyroX * 0.3;
+      camera.position.z = 0; // sempre no centro
 
-      // Avançar continuamente
-      cameraZGlobal -= SPEED;
+      // Avançar continuamente e acumular para atualização
+      cameraZAccum += SPEED;
 
-      // Posição local da câmera dentro do túnel (wraps infinitamente)
-      const wrapDistance = RINGS * SPACING;
-      const localZ = ((cameraZGlobal % wrapDistance) + wrapDistance) % wrapDistance;
-      camera.position.z = -localZ;
+      // Atualizar geometria quando passar pelo threshold
+      if (cameraZAccum >= UPDATE_THRESHOLD) {
+        const ringsToAdvance = Math.floor(cameraZAccum / SPACING);
+        ringStartIndex += ringsToAdvance;
+        cameraZAccum -= ringsToAdvance * SPACING;
+        updateTunnelGeometry();
+      }
 
       // Olhar para frente no túnel
-      camera.lookAt(0, 0, camera.position.z - 15);
+      camera.lookAt(0, 0, -20);
 
       // Rotação do túnel (acompanha o movimento)
       tunnel.rotation.z += 0.003;
