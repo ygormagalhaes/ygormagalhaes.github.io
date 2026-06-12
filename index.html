@@ -70,19 +70,6 @@
     const tunnel = new THREE.LineSegments(geo, mat);
     scene.add(tunnel);
 
-    // ---------- estrelas / partículas ----------
-    const starCount = 220;
-    const starPos = [];
-    for (let i = 0; i < starCount; i++) {
-      const a = Math.random() * Math.PI * 2;
-      const r = RADIUS * (0.1 + Math.random() * 0.8);
-      starPos.push(Math.cos(a) * r, Math.sin(a) * r, -Math.random() * RINGS * SPACING);
-    }
-    const starGeo = new THREE.BufferGeometry();
-    starGeo.setAttribute('position', new THREE.Float32BufferAttribute(starPos, 3));
-    const starMat = new THREE.PointsMaterial({ color: 0xffffff, size: 0.18, transparent: true, opacity: 0.9 });
-    const stars = new THREE.Points(starGeo, starMat);
-    scene.add(stars);
 
     // ---------- reconhecimento de gesto ----------
     let drawing = false, lastX = 0, lastY = 0, stroke = [];
@@ -142,32 +129,46 @@
       renderer.setSize(window.innerWidth, window.innerHeight);
     });
 
+    // ---------- giroscópio / acelerômetro ----------
+    let gyroX = 0, gyroY = 0;
+    const gyroSmoothing = 0.15; // suavização do movimento
+
+    if (window.DeviceOrientationEvent) {
+      window.addEventListener('deviceorientation', (e) => {
+        // beta: rotação em torno do eixo X (frente/trás) -90 a 90
+        // gamma: rotação em torno do eixo Y (esquerda/direita) -180 a 180
+        const beta = e.beta || 0;  // -90 a 90
+        const gamma = e.gamma || 0; // -180 a 180
+
+        // converter para intervalo usado na câmera
+        gyroY = gyroY * (1 - gyroSmoothing) + (gamma / 45) * gyroSmoothing; // -1 a 1 (aprox)
+        gyroX = gyroX * (1 - gyroSmoothing) + (beta / 45) * gyroSmoothing;   // -1 a 1 (aprox)
+
+        // clampar
+        gyroX = Math.max(-1, Math.min(1, gyroX));
+        gyroY = Math.max(-1, Math.min(1, gyroY));
+      }, true);
+    }
+
     // ---------- loop ----------
     const SPEED = 0.45;
+    const GYRO_SCALE = 4; // quanto o giroscópio move a câmera
     let t = 0;
     function animate() {
       requestAnimationFrame(animate);
       t += 0.016;
 
-      // câmera voa para dentro do túnel; wrap perfeito a cada SPACING (geometria periódica)
+      // câmera voa para dentro do túnel
       camera.position.z -= SPEED;
       if (camera.position.z <= -SPACING) camera.position.z += SPACING;
 
-      // leve balanço para dar vida
-      camera.position.x = Math.sin(t * 0.3) * 0.6;
-      camera.position.y = Math.cos(t * 0.23) * 0.6;
+      // posição da câmera controlada pelo giroscópio (em vez de balanço constante)
+      camera.position.x = gyroY * GYRO_SCALE;
+      camera.position.y = gyroX * GYRO_SCALE;
       camera.lookAt(0, 0, camera.position.z - 10);
 
       // rotação suave do túnel (efeito de torção do wormhole)
       tunnel.rotation.z += 0.0015;
-
-      // partículas fluindo em direção à câmera
-      const p = stars.geometry.attributes.position.array;
-      for (let i = 0; i < p.length; i += 3) {
-        p[i + 2] += SPEED;
-        if (p[i + 2] > camera.position.z) p[i + 2] -= RINGS * SPACING;
-      }
-      stars.geometry.attributes.position.needsUpdate = true;
 
       renderer.render(scene, camera);
     }
