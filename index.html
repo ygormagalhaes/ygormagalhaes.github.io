@@ -19,23 +19,29 @@
   <script src="three.min.js"></script>
   <script>
     const scene = new THREE.Scene();
-    scene.fog = new THREE.FogExp2(0x000000, 0.012);
+    scene.fog = new THREE.FogExp2(0x000000, 0.015);
 
-    const camera = new THREE.PerspectiveCamera(80, window.innerWidth / window.innerHeight, 0.1, 1000);
-    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    const camera = new THREE.PerspectiveCamera(85, window.innerWidth / window.innerHeight, 0.1, 1000);
+    const renderer = new THREE.WebGLRenderer({
+      antialias: true,
+      precision: 'highp',
+      powerPreference: 'high-performance'
+    });
     renderer.setPixelRatio(window.devicePixelRatio);
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.setClearColor(0x000000);
+    renderer.shadowMap.enabled = true;
     document.body.appendChild(renderer.domElement);
 
-    // ---------- tunnel mesh (curvy tunnel) ----------
-    const RINGS = 120;
-    const SEG = 64;
-    const SPACING = 2;
-    const RADIUS = 6;
+    // ---------- tunnel mesh with distortion ----------
+    const RINGS = 140;
+    const SEG = 96;
+    const SPACING = 1.8;
+    const RADIUS = 6.5;
 
     const positions = [];
     const colors = [];
+    const originalPositions = [];
     const color = new THREE.Color();
 
     for (let i = 0; i < RINGS; i++) {
@@ -48,8 +54,14 @@
         const x = Math.cos(a) * RADIUS + curveAmount;
         const y = Math.sin(a) * RADIUS + curveY;
         positions.push(x, y, z);
+        originalPositions.push(x, y, z);
+
+        // Cores mais vibrantes e psicadélicas
         const t = i / RINGS;
-        color.setHSL(0.55 + t * 0.05, 1.0, 0.25 + (1 - t) * 0.45);
+        const hue = 0.5 + t * 0.4;
+        const sat = 1.2;
+        const light = 0.3 + (1 - t) * 0.5;
+        color.setHSL(hue % 1, Math.min(1, sat), light);
         colors.push(color.r, color.g, color.b);
       }
     }
@@ -69,38 +81,73 @@
     geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
     geo.setIndex(idx);
 
-    const mat = new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.9 });
+    const mat = new THREE.LineBasicMaterial({
+      vertexColors: true,
+      transparent: true,
+      opacity: 0.95,
+      linewidth: 1.5,
+      fog: true
+    });
     const tunnel = new THREE.LineSegments(geo, mat);
     scene.add(tunnel);
 
-    // ---------- color wave animation ----------
+    // ---------- color wave + distortion ----------
     let colorWaveOffset = 0;
+    let distortionAmount = 0;
     let isSwipingNow = false;
 
-    function updateColorWave() {
-      const positions_arr = geo.attributes.position.array;
+    function updateTunnelEffects() {
+      const pos_arr = geo.attributes.position.array;
       const colors_arr = geo.attributes.color.array;
 
       for (let i = 0; i < RINGS; i++) {
         const z = -i * SPACING;
         const depth = i / RINGS;
 
-        // Onda de cor: muda de acordo com o offset do swipe
-        const hueShift = (depth + colorWaveOffset * 0.3) % 1;
+        // Onda de cor psicadélica
+        const hueShift = (depth + colorWaveOffset * 0.5 + i * 0.02) % 1;
+
+        // Distorção do túnel sincronizada com swipe
+        const distortionFreq = 4;
+        const distortWave = Math.sin(i * 0.08 + distortionAmount * 2) * distortionAmount;
 
         for (let j = 0; j < SEG; j++) {
-          const colorIdx = (i * SEG + j) * 3;
-          const hue = 0.55 + hueShift * 0.3;
-          const c = new THREE.Color().setHSL(hue, 1.0, 0.25 + (1 - depth) * 0.45);
-          colors_arr[colorIdx] = c.r;
-          colors_arr[colorIdx + 1] = c.g;
-          colors_arr[colorIdx + 2] = c.b;
+          const vertexIdx = (i * SEG + j) * 3;
+          const origIdx = (i * SEG + j) * 3;
+
+          // Buscar coordenadas originais
+          const origX = originalPositions[origIdx];
+          const origY = originalPositions[origIdx + 1];
+          const origZ = originalPositions[origIdx + 2];
+
+          // Aplicar distorção
+          const angle = (j / SEG) * Math.PI * 2;
+          const radiusScale = 1 + distortWave * Math.sin(angle * distortionFreq);
+
+          const dx = Math.cos(angle) * RADIUS * radiusScale;
+          const dy = Math.sin(angle) * RADIUS * radiusScale;
+
+          // Atualizar posição com distorção
+          pos_arr[vertexIdx] = dx + Math.sin(i * 0.03) * 4;
+          pos_arr[vertexIdx + 1] = dy + Math.cos(i * 0.025) * 3;
+          pos_arr[vertexIdx + 2] = origZ;
+
+          // Cores psicadélicas dinâmicas
+          const hue = (0.55 + hueShift * 0.5) % 1;
+          const saturation = 1.0 + Math.sin(i * 0.1 + colorWaveOffset) * 0.2;
+          const lightness = 0.25 + (1 - depth) * 0.55 + Math.sin(colorWaveOffset * 2) * 0.1;
+
+          const c = new THREE.Color().setHSL(hue, Math.min(1, saturation), Math.min(1, lightness));
+          colors_arr[vertexIdx] = c.r;
+          colors_arr[vertexIdx + 1] = c.g;
+          colors_arr[vertexIdx + 2] = c.b;
         }
       }
+      geo.attributes.position.needsUpdate = true;
       geo.attributes.color.needsUpdate = true;
     }
 
-    // ---------- line detection system ----------
+    // ---------- line detection ----------
     let isDrawing = false;
     let startY = 0;
     let lastLineTime = 0;
@@ -113,12 +160,14 @@
       isSwipingNow = true;
       startY = y;
       colorWaveOffset = 0;
+      distortionAmount = 0;
     }
 
     function endLine(e) {
       if (!isDrawing) return;
       isDrawing = false;
       isSwipingNow = false;
+      distortionAmount = 0;
 
       const y = e.touches ? e.changedTouches[0].clientY : e.clientY;
       const distance = Math.abs(y - startY);
@@ -128,12 +177,9 @@
         const timeSinceLastLine = now - lastLineTime;
 
         if (timeSinceLastLine < LINE_TIMEOUT) {
-          // Segunda linha dentro do timeout - vai para WB
           console.log('Double line - navigate to WB');
-          isSwipingNow = false;
           window.location.href = 'wb-simulator.html';
         } else {
-          // Primeira linha - aguarda 1500ms para ver se tem segunda
           lastLineTime = now;
           console.log('Single line - waiting 1500ms');
 
@@ -151,8 +197,11 @@
       if (!isSwipingNow) return;
       const y = e.touches ? e.touches[0].clientY : e.clientY;
       const distance = Math.abs(y - startY);
-      colorWaveOffset = distance / window.innerHeight;
-      updateColorWave();
+      const normalizedDist = Math.min(1, distance / window.innerHeight);
+
+      colorWaveOffset = normalizedDist;
+      distortionAmount = normalizedDist * 0.8;
+      updateTunnelEffects();
     }
 
     const el = renderer.domElement;
@@ -171,7 +220,7 @@
 
     // ---------- giroscópio ----------
     let gyroX = 0, gyroY = 0;
-    const gyroSmoothing = 0.1;
+    const gyroSmoothing = 0.08;
 
     if (window.DeviceOrientationEvent) {
       window.addEventListener('deviceorientation', (e) => {
@@ -186,21 +235,37 @@
       }, true);
     }
 
-    // ---------- animation loop ----------
+    // ---------- animation loop @ 60fps ----------
     const SPEED = 0.45;
     const GYRO_SCALE = 1;
+    let frameTime = 0;
+    let lastFrameTime = performance.now();
 
     function animate() {
       requestAnimationFrame(animate);
 
+      const now = performance.now();
+      frameTime = now - lastFrameTime;
+      lastFrameTime = now;
+
+      // Movimento da câmera
       camera.position.z -= SPEED;
       if (camera.position.z <= -SPACING) camera.position.z += SPACING;
 
+      // Giroscópio
       camera.position.x = gyroY * GYRO_SCALE;
       camera.position.y = gyroX * GYRO_SCALE;
       camera.lookAt(0, 0, camera.position.z - 10);
 
+      // Rotação do túnel com movimento fluido
       tunnel.rotation.z += 0.0015;
+
+      // Animação suave se não estiver em swipe (para manter vibrante)
+      if (!isSwipingNow) {
+        const baseWave = Math.sin(performance.now() * 0.0003) * 0.1;
+        colorWaveOffset = baseWave;
+        updateTunnelEffects();
+      }
 
       renderer.render(scene, camera);
     }
