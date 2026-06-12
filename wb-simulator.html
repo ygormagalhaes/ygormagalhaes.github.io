@@ -1,0 +1,575 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Simulador de White Balance — Fujifilm X-T30 II</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#121315;
+    --panel:#1c1e21;
+    --raised:#26292d;
+    --line:#34383d;
+    --line-soft:#2a2d31;
+    --text:#ededeb;
+    --muted:#8d9196;
+    --muted-dim:#6a6e73;
+    --green:#86c440;       /* verde do menu Fuji */
+    --green-dim:#3d5a25;
+    --amber:#f0a23c;       /* quente */
+    --blue:#4ea3e0;        /* frio */
+    --red:#e8584c;
+    --cyan:#46c6c0;
+    --yellow:#e9cf52;
+    --radius:10px;
+    --mono:'JetBrains Mono',ui-monospace,'SF Mono',Menlo,monospace;
+    --disp:'Archivo',system-ui,sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+  html,body{background:var(--bg);color:var(--text);font-family:var(--disp);font-weight:500;
+    -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+  body{min-height:100dvh;padding:18px 16px 40px;line-height:1.4}
+  .wrap{max-width:1180px;margin:0 auto}
+
+  /* ---- header ---- */
+  header{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;
+    padding-bottom:14px;border-bottom:1px solid var(--line);margin-bottom:20px}
+  .brand{font-size:11px;letter-spacing:.34em;text-transform:uppercase;color:var(--green);font-weight:700}
+  h1{font-size:clamp(20px,4.5vw,30px);font-weight:700;letter-spacing:-.01em;line-height:1.05}
+  .sub{color:var(--muted);font-size:12.5px;font-weight:500;max-width:60ch;margin-top:2px;font-family:var(--mono)}
+
+  .layout{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(300px,.85fr);gap:20px;align-items:start}
+  @media(max-width:860px){.layout{grid-template-columns:1fr}}
+
+  /* ---- viewer ---- */
+  .viewer{position:relative;background:var(--panel);border:1px solid var(--line);
+    border-radius:var(--radius);overflow:hidden;aspect-ratio:3/2;display:flex;align-items:center;justify-content:center}
+  .viewer canvas{display:block;width:100%;height:100%;object-fit:contain;touch-action:none}
+  #stage{position:relative;width:100%;height:100%}
+  #displayCanvas{position:absolute;inset:0}
+  /* split handle */
+  #split{position:absolute;top:0;bottom:0;width:2px;background:var(--green);
+    box-shadow:0 0 0 1px rgba(0,0,0,.5);transform:translateX(-50%);display:none;cursor:ew-resize;touch-action:none;z-index:4}
+  #split::before{content:"";position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+    width:30px;height:30px;border-radius:50%;background:var(--green);border:2px solid #0c0d0e;
+    box-shadow:0 2px 8px rgba(0,0,0,.6)}
+  #split::after{content:"◂ ▸";position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+    font-size:9px;color:#0c0d0e;font-weight:700;letter-spacing:-1px}
+  .tag{position:absolute;top:10px;font-family:var(--mono);font-size:10px;letter-spacing:.12em;
+    text-transform:uppercase;background:rgba(10,11,12,.78);padding:4px 8px;border-radius:5px;
+    color:var(--muted);pointer-events:none;z-index:5;opacity:0;transition:opacity .2s}
+  .tag.l{left:10px}.tag.r{right:10px;color:var(--green)}
+  .viewer.comparing .tag{opacity:1}
+
+  /* dropzone */
+  #drop{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    gap:10px;text-align:center;padding:24px;z-index:6;background:var(--panel);transition:background .15s}
+  #drop.hide{display:none}
+  #drop.hot{background:#1f2620;border:1px dashed var(--green)}
+  .drop-ic{width:46px;height:46px;border:2px solid var(--line);border-radius:12px;display:grid;place-items:center;color:var(--muted)}
+  .drop-ic svg{width:24px;height:24px}
+  #drop h2{font-size:15px;font-weight:600}
+  #drop p{font-family:var(--mono);font-size:11px;color:var(--muted);max-width:30ch}
+  .btn{font-family:var(--mono);font-size:12px;font-weight:500;letter-spacing:.02em;
+    display:inline-flex;align-items:center;justify-content:center;
+    background:var(--raised);color:var(--text);border:1px solid var(--line);
+    border-radius:7px;padding:9px 14px;cursor:pointer;transition:.12s;user-select:none}
+  .btn:hover{border-color:var(--green);color:var(--green)}
+  .btn:active{transform:translateY(1px)}
+  .btn.primary{background:var(--green-dim);border-color:var(--green);color:#dff5c4}
+  .btn.primary:hover{background:#48642c}
+
+  /* viewer toolbar */
+  .vbar{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;align-items:center}
+  .vbar .spacer{flex:1}
+
+  /* ---- controls ---- */
+  .ctrl{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:16px}
+  .ctrl + .ctrl{margin-top:14px}
+  .lbl{font-family:var(--mono);font-size:10px;letter-spacing:.2em;text-transform:uppercase;
+    color:var(--muted);display:flex;justify-content:space-between;align-items:center;margin-bottom:11px}
+  .lbl b{color:var(--green);font-weight:700}
+
+  /* preset grid */
+  .presets{display:grid;grid-template-columns:repeat(3,1fr);gap:7px}
+  .pre{background:var(--raised);border:1px solid var(--line-soft);border-radius:7px;
+    padding:9px 6px;cursor:pointer;text-align:center;transition:.12s;display:flex;flex-direction:column;align-items:center;gap:5px}
+  .pre:hover{border-color:var(--muted)}
+  .pre.on{border-color:var(--green);background:#202a18}
+  .pre .ic{width:20px;height:20px;color:var(--muted);transition:.12s}
+  .pre.on .ic{color:var(--green)}
+  .pre .nm{font-size:10.5px;font-weight:600;line-height:1.1}
+  .pre .k{font-family:var(--mono);font-size:9px;color:var(--muted-dim);letter-spacing:.02em}
+  .pre.on .k{color:var(--green)}
+
+  /* kelvin slider */
+  .kelvin{margin-top:13px;padding-top:13px;border-top:1px solid var(--line-soft);
+    opacity:.42;pointer-events:none;transition:opacity .15s}
+  .kelvin.active{opacity:1;pointer-events:auto}
+  .krow{display:flex;align-items:center;gap:12px}
+  .kval{font-family:var(--mono);font-weight:700;font-size:18px;min-width:84px;text-align:right}
+  .kval span{font-size:11px;color:var(--muted);font-weight:500}
+  input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:6px;border-radius:4px;
+    background:linear-gradient(90deg,#3b6fb5 0%,#8ab4e0 22%,#f4f1ea 46%,#f7d79a 64%,#f0a23c 82%,#d9683a 100%);outline:none}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;height:20px;border-radius:50%;
+    background:#fff;border:3px solid var(--green);cursor:pointer;box-shadow:0 1px 4px rgba(0,0,0,.5)}
+  input[type=range]::-moz-range-thumb{width:20px;height:20px;border-radius:50%;background:#fff;border:3px solid var(--green);cursor:pointer}
+
+  /* shift pad */
+  .padwrap{display:flex;gap:16px;align-items:center}
+  @media(max-width:420px){.padwrap{flex-direction:column}}
+  .pad{position:relative;width:170px;height:170px;flex:0 0 auto;border-radius:8px;
+    overflow:hidden;border:1px solid var(--line);touch-action:none;cursor:crosshair}
+  .pad canvas{position:absolute;inset:0;width:100%;height:100%}
+  .pad .grid-ov{position:absolute;inset:0;pointer-events:none;
+    background:
+      linear-gradient(to right,transparent calc(50% - .5px),rgba(255,255,255,.28) calc(50% - .5px),rgba(255,255,255,.28) calc(50% + .5px),transparent calc(50% + .5px)),
+      linear-gradient(to bottom,transparent calc(50% - .5px),rgba(255,255,255,.28) calc(50% - .5px),rgba(255,255,255,.28) calc(50% + .5px),transparent calc(50% + .5px))}
+  .pad .axis{position:absolute;font-family:var(--mono);font-size:9px;font-weight:700;letter-spacing:.1em;
+    pointer-events:none;text-shadow:0 1px 2px rgba(0,0,0,.7)}
+  .ax-r{top:4px;left:50%;transform:translateX(-50%);color:var(--red)}
+  .ax-c{bottom:4px;left:50%;transform:translateX(-50%);color:var(--cyan)}
+  .ax-y{top:50%;left:4px;transform:translateY(-50%);color:var(--yellow)}
+  .ax-b{top:50%;right:4px;transform:translateY(-50%);color:var(--blue)}
+  .knob{position:absolute;width:16px;height:16px;border-radius:50%;background:rgba(255,255,255,.92);
+    border:2px solid #111;transform:translate(-50%,-50%);box-shadow:0 0 0 1px rgba(255,255,255,.4),0 2px 5px rgba(0,0,0,.6);
+    pointer-events:none;z-index:3}
+  .readout{flex:1;min-width:0}
+  .ro-row{display:flex;justify-content:space-between;align-items:baseline;padding:7px 0;border-bottom:1px solid var(--line-soft)}
+  .ro-row:last-child{border-bottom:none}
+  .ro-k{font-family:var(--mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+  .ro-v{font-family:var(--mono);font-size:20px;font-weight:700}
+  .ro-v.r{color:var(--red)}.ro-v.b{color:var(--blue)}
+  .ro-v small{font-size:11px;color:var(--muted);font-weight:500}
+
+  /* explanation */
+  .explain{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+    padding:14px 16px;margin-top:14px}
+  .explain .lbl{margin-bottom:8px}
+  #explainTxt{font-family:var(--mono);font-size:12px;line-height:1.65;color:var(--text)}
+  #explainTxt em{color:var(--amber);font-style:normal}
+  #explainTxt b{color:var(--blue);font-weight:700}
+  #explainTxt .g{color:var(--green)}
+
+  .foot{margin-top:22px;padding-top:14px;border-top:1px solid var(--line);
+    font-family:var(--mono);font-size:10.5px;color:var(--muted-dim);line-height:1.6}
+  .foot b{color:var(--muted)}
+  .hidden{display:none}
+</style>
+</head>
+<body>
+<input type="file" id="file" accept="image/*"
+  style="position:fixed;left:-9999px;top:0;width:1px;height:1px;opacity:0;z-index:-1">
+<div class="wrap">
+  <header>
+    <div>
+      <div class="brand">Fujifilm · X-T30 II</div>
+      <h1>Simulador de White Balance</h1>
+      <p class="sub">Presets, Kelvin e deslocamento de cor (R/B) reproduzidos como na câmera. Compense o branco e veja o efeito em tempo real.</p>
+    </div>
+  </header>
+
+  <div class="layout">
+    <!-- ============ VIEWER ============ -->
+    <div>
+      <div class="viewer" id="viewer">
+        <div id="stage">
+          <canvas id="displayCanvas"></canvas>
+        </div>
+        <div class="tag l">Original</div>
+        <div class="tag r">Ajustado</div>
+        <div id="split"></div>
+        <div id="drop">
+          <div class="drop-ic">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.8"/><path d="M21 15l-5-5L5 21"/>
+            </svg>
+          </div>
+          <h2>Arraste uma foto aqui</h2>
+          <p>ou use a cena de teste para estudar o efeito de cada ajuste</p>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:center">
+            <label class="btn primary" for="file">Escolher imagem</label>
+            <button class="btn" id="sampleBtn">Cena de teste</button>
+          </div>
+        </div>
+      </div>
+      <div class="vbar">
+        <button class="btn" id="cmpBtn">⇄ Comparar</button>
+        <label class="btn" for="file" id="changeBtn">Trocar foto</label>
+        <div class="spacer"></div>
+        <button class="btn primary" id="saveBtn">↓ Salvar PNG</button>
+      </div>
+    </div>
+
+    <!-- ============ CONTROLS ============ -->
+    <div>
+      <div class="ctrl">
+        <div class="lbl">White Balance <b id="curK">5500K</b></div>
+        <div class="presets" id="presets"></div>
+
+        <div class="kelvin" id="kelvinBox">
+          <div class="krow">
+            <input type="range" id="kSlider" min="2500" max="10000" step="50" value="5500">
+            <div class="kval"><span id="kArrow"></span> <span id="kNum">5500</span><span>K</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="ctrl">
+        <div class="lbl">Color Shift <b id="shiftLabel">R 0 · B 0</b></div>
+        <div class="padwrap">
+          <div class="pad" id="pad">
+            <canvas id="padCanvas" width="170" height="170"></canvas>
+            <div class="grid-ov"></div>
+            <div class="axis ax-r">R</div>
+            <div class="axis ax-c">CYAN</div>
+            <div class="axis ax-y">YEL</div>
+            <div class="axis ax-b">B</div>
+            <div class="knob" id="knob"></div>
+          </div>
+          <div class="readout">
+            <div class="ro-row"><span class="ro-k">Vermelho</span><span class="ro-v r" id="roR">±0</span></div>
+            <div class="ro-row"><span class="ro-k">Azul</span><span class="ro-v b" id="roB">±0</span></div>
+            <div class="ro-row"><span class="ro-k">Range</span><span class="ro-v" style="color:var(--muted)"><small>−9 … +9</small></span></div>
+            <button class="btn" id="resetShift" style="width:100%;margin-top:10px">Zerar shift</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="explain ctrl">
+        <div class="lbl">O que a câmera está fazendo</div>
+        <div id="explainTxt"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="foot">
+    <b>Fidelidade:</b> os presets usam as temperaturas de referência da X-T30 II (X-Processor 4) e a câmera aplica a correção <b>inversa</b> à luz — escolher um preset quente (ex.: incandescente) <b>esfria</b> a foto; um preset frio (ex.: sombra) a <b>esquenta</b>. O shift R/B vai de −9 a +9 em cada eixo, exatamente como na grade da câmera. Conversão Kelvin→cor pelo método de Tanner Helland; referência neutra = luz do dia (5500K).
+  </div>
+</div>
+
+<script>
+(function(){
+  "use strict";
+  // ---------- elements ----------
+  const $ = s => document.querySelector(s);
+  const dCanvas = $('#displayCanvas'), dctx = dCanvas.getContext('2d',{willReadFrequently:false});
+  const viewer = $('#viewer'), drop = $('#drop'), fileInput = $('#file');
+  const split = $('#split');
+  const padCanvas = $('#padCanvas'), pctx = padCanvas.getContext('2d');
+  const knob = $('#knob'), pad = $('#pad');
+
+  // offscreen source (original, full color) + working buffer
+  const src = document.createElement('canvas');
+  const sctx = src.getContext('2d',{willReadFrequently:true});
+  let srcData=null, hasImage=false;
+
+  // ---------- state ----------
+  let preset='daylight';
+  let kelvin=5500;
+  let shiftR=0, shiftB=0;          // -9..+9
+  let comparing=false, splitPct=0.5;
+
+  // ---------- preset definitions (X-T30 II / X-Processor 4) ----------
+  // temp = temperatura da LUZ que o preset corrige. Underwater usa ganho fixo.
+  const PRESETS = [
+    {id:'auto',       name:'Auto',         k:5500, note:'adapta à cena', ic:'A'},
+    {id:'daylight',   name:'Daylight',     k:5500, ic:'sun'},
+    {id:'shade',      name:'Sombra',       k:7500, ic:'shade'},
+    {id:'fluor1',     name:'Fluor. 1',     k:6500, sub:'luz dia', ic:'fl'},
+    {id:'fluor2',     name:'Fluor. 2',     k:3800, sub:'branco quente', ic:'fl'},
+    {id:'fluor3',     name:'Fluor. 3',     k:5000, sub:'branco frio', ic:'fl'},
+    {id:'incand',     name:'Incand.',      k:3000, ic:'bulb'},
+    {id:'underwater', name:'Subaq.',       k:0,    special:'uw', ic:'uw'},
+    {id:'kelvin',     name:'Kelvin',       k:5500, ic:'K'}
+  ];
+  const REF_TEMP = 5500;
+  const K_PER_STEP = 0.024;   // intensidade do shift por unidade R/B
+
+  // ---------- icons ----------
+  function icon(t){
+    const c='fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round';
+    const S=s=>`<svg class="ic" viewBox="0 0 24 24" style="${c}">${s}</svg>`;
+    switch(t){
+      case 'sun':  return S('<circle cx="12" cy="12" r="4.2"/><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M5 5l1.8 1.8M17.2 17.2L19 19M19 5l-1.8 1.8M6.8 17.2L5 19"/>');
+      case 'shade':return S('<path d="M17 18a5 5 0 0 0-9.6-2A3.5 3.5 0 0 0 7 22h10a3 3 0 0 0 .6-5.9"/><path d="M12 3v2M5 7l1.4 1.4M19 7l-1.4 1.4"/>');
+      case 'bulb': return S('<path d="M9 18h6M10 21h4"/><path d="M12 2a6 6 0 0 0-3.6 10.8c.6.5.9 1.2 1 2L9.5 18h5l.1-3.2c.1-.8.4-1.5 1-2A6 6 0 0 0 12 2z"/>');
+      case 'fl':   return S('<rect x="9" y="2" width="6" height="20" rx="2"/><path d="M9 7h6M9 17h6"/>');
+      case 'uw':   return S('<path d="M2 17c2 0 2 1.5 4 1.5S8 17 10 17s2 1.5 4 1.5S16 17 18 17s2 1.5 4 1.5"/><path d="M2 21c2 0 2 1.5 4 1.5"/><circle cx="9" cy="8" r="3.5"/><path d="M11.5 10.5 19 5"/>');
+      case 'A':    return `<div class="ic" style="display:grid;place-items:center;font-family:var(--mono);font-weight:700;font-size:14px">A</div>`;
+      case 'K':    return `<div class="ic" style="display:grid;place-items:center;font-family:var(--mono);font-weight:700;font-size:13px">K</div>`;
+      default:     return S('<circle cx="12" cy="12" r="6"/>');
+    }
+  }
+
+  // ---------- Kelvin -> light RGB (Tanner Helland) ----------
+  function kelvinRGB(k){
+    const t=k/100; let r,g,b;
+    if(t<=66){ r=255; g=99.4708025861*Math.log(t)-161.1195681661; }
+    else { r=329.698727446*Math.pow(t-60,-0.1332047592); g=288.1221695283*Math.pow(t-60,-0.0755148492); }
+    if(t>=66) b=255; else if(t<=19) b=0; else b=138.5177312231*Math.log(t-10)-305.0447927307;
+    return [clamp255(r),clamp255(g),clamp255(b)];
+  }
+  function clamp255(v){return v<0?0:v>255?255:v;}
+
+  // ---------- compute channel gains for current settings ----------
+  function computeGains(){
+    let gr,gg,gb;
+    const active = activePreset();
+    if(active.special==='uw'){
+      // correção subaquática: forte ganho de vermelho, leve magenta
+      gr=1.95; gg=1.02; gb=0.62;
+    } else {
+      const temp = (active.id==='kelvin') ? kelvin : active.k;
+      const ref = kelvinRGB(REF_TEMP), lit = kelvinRGB(temp);
+      gr = ref[0]/lit[0]; gg = ref[1]/lit[1]; gb = ref[2]/lit[2];
+      // normaliza pelo verde
+      gr/=gg; gb/=gg; gg=1;
+    }
+    // ---- aplica o color shift (R = vermelho/ciano, B = azul/amarelo) ----
+    const rF = 1 + K_PER_STEP*shiftR;          // +R sobe vermelho
+    const rC = 1 - K_PER_STEP*shiftR*0.5;      // ciano sobe verde/azul
+    const bF = 1 + K_PER_STEP*shiftB;          // +B sobe azul
+    const bC = 1 - K_PER_STEP*shiftB*0.5;      // amarelo sobe verm/verde
+    gr *= rF * bC;
+    gg *= rC * bC;
+    gb *= rC * bF;
+    // preserva luminância (WB não altera exposição)
+    const luma = 0.299*gr + 0.587*gg + 0.114*gb;
+    return [gr/luma, gg/luma, gb/luma];
+  }
+  function activePreset(){ return PRESETS.find(p=>p.id===preset); }
+
+  // ---------- render image ----------
+  function render(){
+    if(!hasImage){ drawExplain(); return; }
+    const [gr,gg,gb]=computeGains();
+    const w=srcData.width,h=srcData.height;
+    const out=dctx.createImageData(w,h);
+    const s=srcData.data,o=out.data;
+    for(let i=0;i<s.length;i+=4){
+      o[i]   = clamp255(s[i]  *gr);
+      o[i+1] = clamp255(s[i+1]*gg);
+      o[i+2] = clamp255(s[i+2]*gb);
+      o[i+3] = s[i+3];
+    }
+    dctx.putImageData(out,0,0);
+    if(comparing){
+      const sx=Math.round(w*splitPct);
+      dctx.drawImage(src,0,0,sx,h,0,0,sx,h);
+    }
+    drawExplain();
+  }
+  let raf=null;
+  function scheduleRender(){ if(raf)return; raf=requestAnimationFrame(()=>{raf=null;render();}); }
+
+  // ---------- load image into canvases ----------
+  function loadImage(img){
+    const MAX=1500;
+    let w=img.width,h=img.height;
+    const sc=Math.min(1,MAX/Math.max(w,h));
+    w=Math.round(w*sc); h=Math.round(h*sc);
+    src.width=dCanvas.width=w; src.height=dCanvas.height=h;
+    sctx.drawImage(img,0,0,w,h);
+    srcData=sctx.getImageData(0,0,w,h);
+    hasImage=true;
+    drop.classList.add('hide');
+    placeSplit();
+    render();
+  }
+  function loadFromFile(f){
+    if(!f||!f.type.startsWith('image/'))return;
+    const img=new Image();
+    img.onload=()=>{URL.revokeObjectURL(img.src);loadImage(img);};
+    img.src=URL.createObjectURL(f);
+  }
+
+  // ---------- synthetic test scene ----------
+  function buildSample(){
+    const w=900,h=600,c=document.createElement('canvas');c.width=w;c.height=h;
+    const x=c.getContext('2d');
+    // céu gradiente
+    let g=x.createLinearGradient(0,0,0,h*0.55);
+    g.addColorStop(0,'#7fb4e8');g.addColorStop(1,'#cfe3f2');
+    x.fillStyle=g;x.fillRect(0,0,w,h*0.55);
+    // chão / folhagem
+    g=x.createLinearGradient(0,h*0.55,0,h);
+    g.addColorStop(0,'#6f8a3c');g.addColorStop(1,'#3f5526');
+    x.fillStyle=g;x.fillRect(0,h*0.55,w,h*0.45);
+    // tira de tons de cinza (neutro = referência de WB)
+    const n=8,sw=w*0.5/n;
+    for(let i=0;i<n;i++){const v=Math.round(20+ i*(220/(n-1)));x.fillStyle=`rgb(${v},${v},${v})`;x.fillRect(20+i*sw,20,sw-3,70);}
+    // patches de cor
+    const patches=[['#c98d6b',520,20],['#d8b48f',600,20],['#a14b3d',680,20],
+                   ['#3f6cae',760,20],['#c7c24a',840-30,20]];
+    patches.forEach(([col,px,py])=>{x.fillStyle=col;x.fillRect(px,py,55,70);});
+    // "pele" grande
+    x.fillStyle='#d2a182';x.beginPath();x.ellipse(w*0.7,h*0.72,95,120,0,0,7);x.fill();
+    x.fillStyle='#b9805f';x.beginPath();x.ellipse(w*0.7,h*0.66,42,50,0,0,7);x.fill();
+    // patch branco de referência
+    x.fillStyle='#f3f1ec';x.fillRect(40,h*0.7,140,90);
+    x.strokeStyle='rgba(0,0,0,.25)';x.strokeRect(40,h*0.7,140,90);
+    const img=new Image();img.onload=()=>loadImage(img);img.src=c.toDataURL();
+  }
+
+  // ---------- explanation text ----------
+  function drawExplain(){
+    const a=activePreset();
+    const el=$('#explainTxt');
+    let temp = a.id==='kelvin'?kelvin:a.k;
+    let head='';
+    if(a.special==='uw'){
+      head=`Modo <span class="g">Subaquático</span>: a câmera assume luz azul-esverdeada e aplica um forte ganho de <em>vermelho</em> para recuperar as cores perdidas na água.`;
+    } else if(a.id==='auto'){
+      head=`<span class="g">Auto (AWB)</span>: a câmera mede a cena e estima a temperatura. Aqui usamos ~<b>5500K</b> como base neutra de referência.`;
+    } else {
+      const rel = temp<REF_TEMP
+        ? `Como ${temp}K é mais <em>quente</em> que a referência (5500K), a câmera <b>esfria</b> a imagem (puxa azul, tira vermelho) para neutralizar.`
+        : temp>REF_TEMP
+          ? `Como ${temp}K é mais <b>frio</b> que a referência (5500K), a câmera <em>esquenta</em> a imagem (puxa vermelho/âmbar, tira azul).`
+          : `${temp}K é a própria referência neutra: nenhuma correção de temperatura é aplicada.`;
+      head=`<span class="g">${a.name}</span> corrige luz de <b>${temp}K</b>. ${rel}`;
+    }
+    let shiftTxt='';
+    if(shiftR||shiftB){
+      const parts=[];
+      if(shiftR>0)parts.push(`<em>+${shiftR}R</em> adiciona vermelho`);
+      if(shiftR<0)parts.push(`${shiftR}R adiciona ciano`);
+      if(shiftB>0)parts.push(`<b>+${shiftB}B</b> adiciona azul`);
+      if(shiftB<0)parts.push(`${shiftB}B adiciona amarelo`);
+      shiftTxt=`<br><br>Color Shift: ${parts.join(' · ')} — um tom aplicado por cima da temperatura.`;
+    }
+    el.innerHTML = head + shiftTxt;
+  }
+
+  // ---------- shift pad drawing ----------
+  function drawPad(){
+    const N=170;const im=pctx.createImageData(N,N);const d=im.data;
+    for(let y=0;y<N;y++)for(let x=0;x<N;x++){
+      const nx=(x/(N-1))*2-1;   // -1..1  (B axis: right=+B)
+      const ny=(y/(N-1))*2-1;   // -1..1  (top=-1 => +R)
+      const r=128 + (-ny)*70 + (-nx)*0;     // +R no topo
+      const b=128 + (nx)*70;                // +B na direita
+      const g=128 - (-ny)*30 + (-nx)*20;    // verde compensa p/ ciano/amarelo parecerem certos
+      const i=(y*N+x)*4;
+      d[i]=clamp255(r);d[i+1]=clamp255(g);d[i+2]=clamp255(b);d[i+3]=205;
+    }
+    pctx.putImageData(im,0,0);
+  }
+  function placeKnob(){
+    const px=((shiftB/9)*0.5+0.5)*100;
+    const py=((-shiftR/9)*0.5+0.5)*100;
+    knob.style.left=px+'%';knob.style.top=py+'%';
+  }
+
+  // ---------- split slider ----------
+  function placeSplit(){ split.style.left=(splitPct*100)+'%'; }
+  function setComparing(on){
+    comparing=on; viewer.classList.toggle('comparing',on);
+    split.style.display=on?'block':'none';
+    $('#cmpBtn').classList.toggle('primary',on);
+    render();
+  }
+
+  // ============ wiring ============
+  // build presets
+  const pc=$('#presets');
+  PRESETS.forEach(p=>{
+    const b=document.createElement('div');b.className='pre';b.dataset.id=p.id;
+    const k = p.special?'—' : (p.id==='kelvin'?'var':p.k+'K');
+    b.innerHTML=`${icon(p.ic)}<div class="nm">${p.name}</div><div class="k">${p.sub||k}</div>`;
+    b.addEventListener('click',()=>selectPreset(p.id));
+    pc.appendChild(b);
+  });
+  function selectPreset(id){
+    preset=id;
+    document.querySelectorAll('.pre').forEach(e=>e.classList.toggle('on',e.dataset.id===id));
+    const a=activePreset();
+    $('#kelvinBox').classList.toggle('active',id==='kelvin');
+    if(id==='kelvin'){ updateK(); }
+    else { $('#curK').textContent = a.special?'—': a.k+'K'; }
+    scheduleRender();
+  }
+  // kelvin slider
+  const kSlider=$('#kSlider');
+  kSlider.addEventListener('input',()=>{kelvin=+kSlider.value;updateK();scheduleRender();});
+  function updateK(){
+    $('#kNum').textContent=kelvin;
+    $('#curK').textContent=kelvin+'K';
+    const arrow = kelvin<REF_TEMP?'❄':kelvin>REF_TEMP?'☀':'·';
+    $('#kArrow').textContent=arrow;
+    $('#kArrow').style.color = kelvin<REF_TEMP?'var(--blue)':kelvin>REF_TEMP?'var(--amber)':'var(--muted)';
+  }
+
+  // shift readouts
+  function syncShift(){
+    $('#roR').textContent=(shiftR>0?'+':'')+shiftR;
+    $('#roB').textContent=(shiftB>0?'+':'')+shiftB;
+    $('#shiftLabel').textContent=`R ${shiftR>0?'+':''}${shiftR} · B ${shiftB>0?'+':''}${shiftB}`;
+    placeKnob();
+  }
+  // pad interaction
+  let dragging=false;
+  function padPos(e){
+    const r=pad.getBoundingClientRect();
+    const cx=(e.touches?e.touches[0].clientX:e.clientX);
+    const cy=(e.touches?e.touches[0].clientY:e.clientY);
+    let nx=(cx-r.left)/r.width;  let ny=(cy-r.top)/r.height;
+    nx=Math.max(0,Math.min(1,nx));ny=Math.max(0,Math.min(1,ny));
+    shiftB=Math.round((nx*2-1)*9);
+    shiftR=Math.round((-(ny*2-1))*9);
+    shiftR=Math.max(-9,Math.min(9,shiftR));shiftB=Math.max(-9,Math.min(9,shiftB));
+    syncShift();scheduleRender();
+  }
+  function startPad(e){dragging=true;padPos(e);e.preventDefault();}
+  pad.addEventListener('mousedown',startPad);
+  pad.addEventListener('touchstart',startPad,{passive:false});
+  window.addEventListener('mousemove',e=>{if(dragging)padPos(e);});
+  window.addEventListener('touchmove',e=>{if(dragging)padPos(e);},{passive:false});
+  window.addEventListener('mouseup',()=>dragging=false);
+  window.addEventListener('touchend',()=>dragging=false);
+  $('#resetShift').addEventListener('click',()=>{shiftR=0;shiftB=0;syncShift();scheduleRender();});
+
+  // split drag
+  let splitDrag=false;
+  function moveSplit(e){
+    const r=viewer.getBoundingClientRect();
+    const cx=(e.touches?e.touches[0].clientX:e.clientX);
+    splitPct=Math.max(0,Math.min(1,(cx-r.left)/r.width));
+    placeSplit();render();
+  }
+  split.addEventListener('mousedown',e=>{splitDrag=true;e.preventDefault();});
+  split.addEventListener('touchstart',e=>{splitDrag=true;e.preventDefault();},{passive:false});
+  window.addEventListener('mousemove',e=>{if(splitDrag)moveSplit(e);});
+  window.addEventListener('touchmove',e=>{if(splitDrag)moveSplit(e);},{passive:false});
+  window.addEventListener('mouseup',()=>splitDrag=false);
+  window.addEventListener('touchend',()=>splitDrag=false);
+
+  // file / buttons
+  fileInput.addEventListener('change',e=>loadFromFile(e.target.files[0]));
+  $('#sampleBtn').addEventListener('click',buildSample);
+  $('#cmpBtn').addEventListener('click',()=>setComparing(!comparing));
+  $('#saveBtn').addEventListener('click',()=>{
+    if(!hasImage){buildSample();return;}
+    const wasC=comparing; if(wasC)setComparing(false);
+    const a=activePreset();const tag=a.id==='kelvin'?kelvin+'K':a.name;
+    const link=document.createElement('a');
+    link.download=`wb_${tag}_R${shiftR}_B${shiftB}.png`.replace(/\s/g,'');
+    link.href=dCanvas.toDataURL('image/png');link.click();
+    if(wasC)setComparing(true);
+  });
+
+  // drag & drop
+  ['dragenter','dragover'].forEach(ev=>viewer.addEventListener(ev,e=>{e.preventDefault();drop.classList.add('hot');}));
+  ['dragleave','drop'].forEach(ev=>viewer.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove('hot');}));
+  viewer.addEventListener('drop',e=>{if(e.dataTransfer.files[0])loadFromFile(e.dataTransfer.files[0]);});
+
+  // ---------- init ----------
+  drawPad();syncShift();selectPreset('daylight');updateK();drawExplain();
+})();
+</script>
+</body>
+</html>
