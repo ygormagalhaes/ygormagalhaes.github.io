@@ -95,7 +95,7 @@
     let colorWaveOffset = 0;
     let distortionAmount = 0;
     let targetDistortionAmount = 0;
-    let lastMovementTime = 0;
+    let lastMovementTime = Date.now();
     const DISTORTION_DECAY_DURATION = 500; // ms
 
     function updateTunnelEffects() {
@@ -224,18 +224,13 @@
       const timeSinceMovement = now - lastMovementTime;
 
       if (timeSinceMovement < DISTORTION_DECAY_DURATION) {
-        // Ainda está no período de decay - interpolar para 0
+        // Ainda está no período de decay - interpolar com easing cubic
         const progress = timeSinceMovement / DISTORTION_DECAY_DURATION;
-        distortionAmount = targetDistortionAmount * (1 - progress);
+        const easing = 1 - Math.pow(1 - progress, 3); // cubic ease-out
+        distortionAmount = targetDistortionAmount * (1 - easing);
       } else {
         // Além do decay time - manter em 0
         distortionAmount = 0;
-      }
-
-      // Suavizar transições (easing)
-      const easing = 1 - Math.pow(1 - Math.min(1, timeSinceMovement / DISTORTION_DECAY_DURATION), 3);
-      if (timeSinceMovement < DISTORTION_DECAY_DURATION) {
-        distortionAmount = targetDistortionAmount * (1 - easing);
       }
 
       updateTunnelEffects();
