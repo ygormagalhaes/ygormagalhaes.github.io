@@ -147,10 +147,10 @@
     let lastAccelX = 0;
     let lastAccelY = 0;
     let lastAccelZ = 0;
-    const MOVEMENT_THRESHOLD = 15; // m/s² - para disparar distorção
+    const MOVEMENT_THRESHOLD = 8; // m/s² - para disparar distorção (reduzido para teste)
 
     if (window.DeviceMotionEvent) {
-      window.addEventListener('devicemotion', (e) => {
+      const handleMotion = (e) => {
         const accel = e.acceleration;
         if (!accel) return;
 
@@ -161,15 +161,27 @@
         // Calcular magnitude da aceleração
         const magnitude = Math.sqrt(ax * ax + ay * ay + az * az);
 
+        console.log('Aceleração:', magnitude.toFixed(2), 'ax:', ax.toFixed(2), 'ay:', ay.toFixed(2), 'az:', az.toFixed(2));
+
         // Movimento detectado - aplicar distorção
         if (magnitude > MOVEMENT_THRESHOLD) {
-          targetDistortionAmount = Math.min(1, magnitude / 50); // Normalizar para 0-1
+          targetDistortionAmount = Math.min(1, magnitude / 30);
           lastMovementTime = Date.now();
+          console.log('Distorção acionada:', targetDistortionAmount.toFixed(2));
         }
 
         lastAccelX = ax;
         lastAccelY = ay;
         lastAccelZ = az;
+      };
+
+      window.addEventListener('devicemotion', handleMotion);
+
+      // Fallback: toque na tela para ativar distorção (para testes em desktop)
+      renderer.domElement.addEventListener('click', () => {
+        targetDistortionAmount = 0.6;
+        lastMovementTime = Date.now();
+        console.log('Distorção ativada por toque');
       });
     }
 
