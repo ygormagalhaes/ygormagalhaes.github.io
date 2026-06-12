@@ -16,188 +16,125 @@
   </style>
 </head>
 <body>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="three.min.js"></script>
   <script>
     const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    scene.fog = new THREE.FogExp2(0x000000, 0.012);
 
+    const camera = new THREE.PerspectiveCamera(80, window.innerWidth / window.innerHeight, 0.1, 1000);
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setPixelRatio(window.devicePixelRatio);
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.setClearColor(0x000000);
     document.body.appendChild(renderer.domElement);
 
-    camera.position.z = 5;
+    // ---------- tunnel mesh (cylindrical grid) ----------
+    const RINGS = 90;       // anéis ao longo do túnel
+    const SEG = 48;         // segmentos por anel
+    const SPACING = 3;      // distância entre anéis (z)
+    const RADIUS = 7;       // raio do túnel
 
-    // Criar malha do buraco de minhoca com superfície
-    const tubeSegments = 60;
-    const tubeRadius = 30;
-    const circleSegments = 64;
+    const positions = [];
+    const colors = [];
+    const color = new THREE.Color();
 
-    // Array para armazenar vértices e índices
-    const vertices = [];
-    const indices = [];
-
-    for (let i = 0; i < tubeSegments; i++) {
-      const z = (i - tubeSegments / 2) * 0.5;
-      const radiusScale = 0.5 + (i / tubeSegments) * 1.5;
-
-      for (let j = 0; j < circleSegments; j++) {
-        const angle = (j / circleSegments) * Math.PI * 2;
-        const x = Math.cos(angle) * radiusScale;
-        const y = Math.sin(angle) * radiusScale;
-        vertices.push(x, y, z);
+    // vértices: RINGS x SEG
+    for (let i = 0; i < RINGS; i++) {
+      const z = -i * SPACING;
+      for (let j = 0; j < SEG; j++) {
+        const a = (j / SEG) * Math.PI * 2;
+        positions.push(Math.cos(a) * RADIUS, Math.sin(a) * RADIUS, z);
+        // gradiente de cor por profundidade: azul fundo -> ciano -> branco perto
+        const t = i / RINGS;
+        color.setHSL(0.55 + t * 0.05, 1.0, 0.25 + (1 - t) * 0.45);
+        colors.push(color.r, color.g, color.b);
       }
     }
 
-    // Criar índices para wireframe (linhas entre vértices)
-    for (let i = 0; i < tubeSegments - 1; i++) {
-      for (let j = 0; j < circleSegments; j++) {
-        const current = i * circleSegments + j;
-        const next = i * circleSegments + (j + 1) % circleSegments;
-        const below = (i + 1) * circleSegments + j;
-        const belowNext = (i + 1) * circleSegments + (j + 1) % circleSegments;
-
-        // Linhas horizontais (círculos)
-        indices.push(current, next);
-        // Linhas verticais (conectores)
-        indices.push(current, below);
+    const idx = [];
+    for (let i = 0; i < RINGS; i++) {
+      for (let j = 0; j < SEG; j++) {
+        const cur = i * SEG + j;
+        const nextJ = i * SEG + (j + 1) % SEG;
+        idx.push(cur, nextJ);                  // linha circunferencial
+        if (i < RINGS - 1) idx.push(cur, cur + SEG); // linha longitudinal
       }
     }
 
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(vertices), 3));
-    geometry.setIndex(new THREE.BufferAttribute(new Uint32Array(indices), 1));
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+    geo.setIndex(idx);
 
-    // Material com gradiente de cores
-    const material = new THREE.LineBasicMaterial({
-      color: 0x0088ff,
-      linewidth: 1,
-      fog: false
-    });
+    const mat = new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.9 });
+    const tunnel = new THREE.LineSegments(geo, mat);
+    scene.add(tunnel);
 
-    const wormhole = new THREE.LineSegments(geometry, material);
-    scene.add(wormhole);
-
-    // Adicionar pontos brilhantes (particles)
-    const particleGeometry = new THREE.BufferGeometry();
-    const particlePositions = [];
-    for (let i = 0; i < 100; i++) {
-      const angle = Math.random() * Math.PI * 2;
-      const z = (Math.random() - 0.5) * tubeSegments * 0.5;
-      const radius = 0.7 + Math.random() * 0.8;
-      particlePositions.push(
-        Math.cos(angle) * radius,
-        Math.sin(angle) * radius,
-        z
-      );
+    // ---------- estrelas / partículas ----------
+    const starCount = 220;
+    const starPos = [];
+    for (let i = 0; i < starCount; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const r = RADIUS * (0.1 + Math.random() * 0.8);
+      starPos.push(Math.cos(a) * r, Math.sin(a) * r, -Math.random() * RINGS * SPACING);
     }
-    particleGeometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(particlePositions), 3));
-    const particleMaterial = new THREE.PointsMaterial({ color: 0xffffff, size: 0.15 });
-    const particles = new THREE.Points(particleGeometry, particleMaterial);
-    scene.add(particles);
+    const starGeo = new THREE.BufferGeometry();
+    starGeo.setAttribute('position', new THREE.Float32BufferAttribute(starPos, 3));
+    const starMat = new THREE.PointsMaterial({ color: 0xffffff, size: 0.18, transparent: true, opacity: 0.9 });
+    const stars = new THREE.Points(starGeo, starMat);
+    scene.add(stars);
 
-    // Gesture recognition
-    let isDrawing = false;
-    let lastX = 0, lastY = 0;
-    let strokePoints = [];
-    const threshold = 15;
+    // ---------- reconhecimento de gesto ----------
+    let drawing = false, lastX = 0, lastY = 0, stroke = [];
+    const TH = 14;
 
-    function normalizeStroke(points) {
-      if (points.length < 2) return null;
-      const minX = Math.min(...points.map(p => p.x));
-      const maxX = Math.max(...points.map(p => p.x));
-      const minY = Math.min(...points.map(p => p.y));
-      const maxY = Math.max(...points.map(p => p.y));
-      const width = maxX - minX || 1;
-      const height = maxY - minY || 1;
-      return points.map(p => ({
-        x: (p.x - minX) / width,
-        y: (p.y - minY) / height
-      }));
+    function normalize(pts) {
+      if (pts.length < 2) return null;
+      const xs = pts.map(p => p.x), ys = pts.map(p => p.y);
+      const minX = Math.min(...xs), maxX = Math.max(...xs);
+      const minY = Math.min(...ys), maxY = Math.max(...ys);
+      const w = maxX - minX || 1, h = maxY - minY || 1;
+      return pts.map(p => ({ x: (p.x - minX) / w, y: (p.y - minY) / h }));
     }
 
-    function recognize(normalized) {
-      if (!normalized || normalized.length < 5) return null;
-      let curveScore = 0;
-      for (let i = 1; i < normalized.length - 1; i++) {
-        const dx = normalized[i + 1].x - normalized[i].x;
-        const dy = normalized[i + 1].y - normalized[i].y;
-        const px = normalized[i].x - normalized[i - 1].x;
-        const py = normalized[i].y - normalized[i - 1].y;
-        curveScore += Math.abs(dx * py - dy * px);
+    function recognize(n) {
+      if (!n || n.length < 5) return null;
+      let curve = 0;
+      for (let i = 1; i < n.length - 1; i++) {
+        const dx = n[i + 1].x - n[i].x, dy = n[i + 1].y - n[i].y;
+        const px = n[i].x - n[i - 1].x, py = n[i].y - n[i - 1].y;
+        curve += Math.abs(dx * py - dy * px);
       }
-      curveScore /= normalized.length;
-      const heights = normalized.map(p => p.y);
-      const isVertical = (Math.max(...heights) - Math.min(...heights)) > 0.4;
-      const widths = normalized.map(p => p.x);
-      const isWide = (Math.max(...widths) - Math.min(...widths)) > 0.5;
-
-      if (curveScore > 0.06 && isVertical && normalized[0].x < 0.4) return 'P';
-      if (curveScore > 0.12 && isWide && isVertical) return 'W';
+      curve /= n.length;
+      const ys = n.map(p => p.y), xs = n.map(p => p.x);
+      const vertical = (Math.max(...ys) - Math.min(...ys)) > 0.4;
+      const wide = (Math.max(...xs) - Math.min(...xs)) > 0.5;
+      if (curve > 0.06 && vertical && n[0].x < 0.4) return 'P';
+      if (curve > 0.12 && wide && vertical) return 'W';
       return null;
     }
 
-    function handleGesture() {
-      const normalized = normalizeStroke(strokePoints);
-      const char = recognize(normalized);
-      if (char === 'P') window.location.href = 'pixel-lab.html';
-      else if (char === 'W') window.location.href = 'simulador-wb-xt30ii.html';
+    function finish() {
+      const c = recognize(normalize(stroke));
+      if (c === 'P') window.location.href = 'pixel-lab.html';
+      else if (c === 'W') window.location.href = 'simulador-wb-xt30ii.html';
+      stroke = [];
     }
 
-    renderer.domElement.addEventListener('mousedown', (e) => {
-      isDrawing = true;
-      strokePoints = [];
-      lastX = e.clientX;
-      lastY = e.clientY;
-      strokePoints.push({ x: lastX, y: lastY });
+    const el = renderer.domElement;
+    el.addEventListener('mousedown', e => { drawing = true; stroke = [{ x: e.clientX, y: e.clientY }]; lastX = e.clientX; lastY = e.clientY; });
+    el.addEventListener('mousemove', e => {
+      if (!drawing) return;
+      if (Math.hypot(e.clientX - lastX, e.clientY - lastY) > TH) { stroke.push({ x: e.clientX, y: e.clientY }); lastX = e.clientX; lastY = e.clientY; }
     });
-
-    renderer.domElement.addEventListener('mousemove', (e) => {
-      if (!isDrawing) return;
-      const dist = Math.hypot(e.clientX - lastX, e.clientY - lastY);
-      if (dist > threshold) {
-        strokePoints.push({ x: e.clientX, y: e.clientY });
-        lastX = e.clientX;
-        lastY = e.clientY;
-      }
-    });
-
-    renderer.domElement.addEventListener('mouseup', () => {
-      if (isDrawing) {
-        isDrawing = false;
-        handleGesture();
-        strokePoints = [];
-      }
-    });
-
-    renderer.domElement.addEventListener('touchstart', (e) => {
-      const touch = e.touches[0];
-      isDrawing = true;
-      strokePoints = [];
-      lastX = touch.clientX;
-      lastY = touch.clientY;
-      strokePoints.push({ x: lastX, y: lastY });
-    });
-
-    renderer.domElement.addEventListener('touchmove', (e) => {
-      if (!isDrawing) return;
-      e.preventDefault();
-      const touch = e.touches[0];
-      const dist = Math.hypot(touch.clientX - lastX, touch.clientY - lastY);
-      if (dist > threshold) {
-        strokePoints.push({ x: touch.clientX, y: touch.clientY });
-        lastX = touch.clientX;
-        lastY = touch.clientY;
-      }
-    });
-
-    renderer.domElement.addEventListener('touchend', () => {
-      if (isDrawing) {
-        isDrawing = false;
-        handleGesture();
-        strokePoints = [];
-      }
-    });
+    el.addEventListener('mouseup', () => { if (drawing) { drawing = false; finish(); } });
+    el.addEventListener('touchstart', e => { const t = e.touches[0]; drawing = true; stroke = [{ x: t.clientX, y: t.clientY }]; lastX = t.clientX; lastY = t.clientY; });
+    el.addEventListener('touchmove', e => {
+      if (!drawing) return; e.preventDefault();
+      const t = e.touches[0];
+      if (Math.hypot(t.clientX - lastX, t.clientY - lastY) > TH) { stroke.push({ x: t.clientX, y: t.clientY }); lastX = t.clientX; lastY = t.clientY; }
+    }, { passive: false });
+    el.addEventListener('touchend', () => { if (drawing) { drawing = false; finish(); } });
 
     window.addEventListener('resize', () => {
       camera.aspect = window.innerWidth / window.innerHeight;
@@ -205,31 +142,35 @@
       renderer.setSize(window.innerWidth, window.innerHeight);
     });
 
-    let time = 0;
+    // ---------- loop ----------
+    const SPEED = 0.45;
+    let t = 0;
     function animate() {
       requestAnimationFrame(animate);
-      time += 0.016;
+      t += 0.016;
 
-      // Rotacionar o wormhole
-      wormhole.rotation.z = time * 0.2;
+      // câmera voa para dentro do túnel; wrap perfeito a cada SPACING (geometria periódica)
+      camera.position.z -= SPEED;
+      if (camera.position.z <= -SPACING) camera.position.z += SPACING;
 
-      // Animar partículas
-      const positions = particles.geometry.attributes.position.array;
-      for (let i = 0; i < positions.length; i += 3) {
-        positions[i + 2] += 0.08;
-        if (positions[i + 2] > tubeSegments * 0.25) {
-          positions[i + 2] = -tubeSegments * 0.25;
-        }
+      // leve balanço para dar vida
+      camera.position.x = Math.sin(t * 0.3) * 0.6;
+      camera.position.y = Math.cos(t * 0.23) * 0.6;
+      camera.lookAt(0, 0, camera.position.z - 10);
+
+      // rotação suave do túnel (efeito de torção do wormhole)
+      tunnel.rotation.z += 0.0015;
+
+      // partículas fluindo em direção à câmera
+      const p = stars.geometry.attributes.position.array;
+      for (let i = 0; i < p.length; i += 3) {
+        p[i + 2] += SPEED;
+        if (p[i + 2] > camera.position.z) p[i + 2] -= RINGS * SPACING;
       }
-      particles.geometry.attributes.position.needsUpdate = true;
-
-      // Variar cor da malha
-      const hue = (time * 0.1) % 1;
-      material.color.setHSL(hue, 1, 0.4);
+      stars.geometry.attributes.position.needsUpdate = true;
 
       renderer.render(scene, camera);
     }
-
     animate();
   </script>
 </body>
