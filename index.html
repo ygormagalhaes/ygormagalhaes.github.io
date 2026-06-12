@@ -22,19 +22,14 @@
     scene.fog = new THREE.FogExp2(0x000000, 0.015);
 
     const camera = new THREE.PerspectiveCamera(85, window.innerWidth / window.innerHeight, 0.1, 1000);
-    const renderer = new THREE.WebGLRenderer({
-      antialias: true,
-      precision: 'highp',
-      powerPreference: 'high-performance'
-    });
+    const renderer = new THREE.WebGLRenderer({ antialias: true, precision: 'highp', powerPreference: 'high-performance' });
     renderer.setPixelRatio(window.devicePixelRatio);
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.setClearColor(0x000000);
-    renderer.shadowMap.enabled = true;
     document.body.appendChild(renderer.domElement);
 
-    // ---------- tunnel mesh with sliding window ----------
-    const VISIBLE_RINGS = 100; // quantos anéis manter visíveis
+    // ---------- tunnel parameters ----------
+    const VISIBLE_RINGS = 80;
     const SEG = 96;
     const SPACING = 1.8;
     const RADIUS = 6.5;
@@ -43,14 +38,10 @@
     const colors = [];
     const color = new THREE.Color();
 
-    function generateRingGeometry(ringIndex) {
-      // Gera geometria de um anel específico da trajetória infinita
-      // ringIndex aumenta conforme avança, Z negativo conforme se afasta da câmera
+    function generateRing(ringIndex) {
       const z = -ringIndex * SPACING;
-
       const mainCurveX = Math.sin(ringIndex * 0.08) * 6 + Math.sin(ringIndex * 0.02) * 4;
       const mainCurveY = Math.cos(ringIndex * 0.06) * 5 + Math.sin(ringIndex * 0.03) * 4 + Math.cos(ringIndex * 0.01) * 3;
-
       const loopX = Math.sin(ringIndex * 0.15) * 2;
       const loopY = Math.cos(ringIndex * 0.12) * 2;
 
@@ -63,20 +54,16 @@
         const y = Math.sin(a) * RADIUS + mainCurveY + loopY;
         verts.push(x, y, z);
 
-        const hue = 0.5 + (ringIndex % 100) * 0.004;
-        const sat = 1.2;
-        const light = 0.4;
-        color.setHSL(hue % 1, Math.min(1, sat), light);
+        const hue = (0.5 + (ringIndex % 200) * 0.002) % 1;
+        color.setHSL(hue, 1.0, 0.4);
         cols.push(color.r, color.g, color.b);
       }
-
       return { verts, cols };
     }
 
-    // Gerar anéis iniciais (começam no index 0)
-    let ringStartIndex = 0;
+    // Gerar geometria inicial
     for (let i = 0; i < VISIBLE_RINGS; i++) {
-      const ring = generateRingGeometry(ringStartIndex + i);
+      const ring = generateRing(i);
       positions.push(...ring.verts);
       colors.push(...ring.cols);
     }
@@ -96,129 +83,86 @@
     geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
     geo.setIndex(idx);
 
-    const mat = new THREE.LineBasicMaterial({
-      vertexColors: true,
-      transparent: true,
-      opacity: 0.95,
-      linewidth: 1.5,
-      fog: true
-    });
+    const mat = new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.95, fog: true });
     const tunnel = new THREE.LineSegments(geo, mat);
     scene.add(tunnel);
 
-    // ---------- color wave + distortion animation ----------
-    let colorWaveOffset = 0;
-    let distortionAmount = 0;
-    let targetDistortionAmount = 0;
-    let lastMovementTime = Date.now();
-    const DISTORTION_DECAY_DURATION = 500; // ms
+    // ---------- sliding window system ----------
+    let ringOffset = 0;
+    let distanceAccum = 0;
+    const UPDATE_DISTANCE = SPACING * 3;
 
-    function updateTunnelEffects() {
+    function updateGeometry() {
       const pos_arr = geo.attributes.position.array;
-      const colors_arr = geo.attributes.color.array;
+      const col_arr = geo.attributes.color.array;
 
-      for (let i = 0; i < RINGS; i++) {
-        const z = -i * SPACING;
-        const depth = i / RINGS;
-
-        // Onda de cor psicadélica
-        const hueShift = (depth + colorWaveOffset * 0.5 + i * 0.02) % 1;
-
-        // Distorção suave do túnel
-        const distortionFreq = 4;
-        const distortWave = Math.sin(i * 0.08 + distortionAmount * 2) * distortionAmount;
+      for (let i = 0; i < VISIBLE_RINGS; i++) {
+        const ring = generateRing(ringOffset + i);
+        const verts = ring.verts;
+        const cols = ring.cols;
 
         for (let j = 0; j < SEG; j++) {
-          const vertexIdx = (i * SEG + j) * 3;
+          const idx = (i * SEG + j) * 3;
+          pos_arr[idx] = verts[j * 3];
+          pos_arr[idx + 1] = verts[j * 3 + 1];
+          pos_arr[idx + 2] = verts[j * 3 + 2] - distanceAccum;
 
-          // Aplicar distorção à posição
-          const angle = (j / SEG) * Math.PI * 2;
-          const radiusScale = 1 + distortWave * Math.sin(angle * distortionFreq);
-
-          const dx = Math.cos(angle) * RADIUS * radiusScale;
-          const dy = Math.sin(angle) * RADIUS * radiusScale;
-
-          // Atualizar posição com distorção
-          pos_arr[vertexIdx] = dx + Math.sin(i * 0.03) * 4;
-          pos_arr[vertexIdx + 1] = dy + Math.cos(i * 0.025) * 3;
-          pos_arr[vertexIdx + 2] = z;
-
-          // Cores psicadélicas dinâmicas
-          const hue = (0.55 + hueShift * 0.5) % 1;
-          const saturation = 1.0 + Math.sin(i * 0.1 + colorWaveOffset) * 0.2;
-          const lightness = 0.25 + (1 - depth) * 0.55 + Math.sin(colorWaveOffset * 2) * 0.1;
-
-          const c = new THREE.Color().setHSL(hue, Math.min(1, saturation), Math.min(1, lightness));
-          colors_arr[vertexIdx] = c.r;
-          colors_arr[vertexIdx + 1] = c.g;
-          colors_arr[vertexIdx + 2] = c.b;
+          col_arr[idx] = cols[j * 3];
+          col_arr[idx + 1] = cols[j * 3 + 1];
+          col_arr[idx + 2] = cols[j * 3 + 2];
         }
       }
+
       geo.attributes.position.needsUpdate = true;
       geo.attributes.color.needsUpdate = true;
     }
 
-    // ---------- touch/mouse input para distorção ----------
-    let isInteracting = false;
-    let lastInteractionTime = 0;
+    // ---------- distortion ----------
+    let distortionAmount = 0;
+    let targetDistortion = 0;
+    let lastDistortionTime = 0;
+    const DISTORTION_DURATION = 500;
 
-    function triggerDistortion(intensity = 0.8) {
-      targetDistortionAmount = Math.min(1, intensity);
-      lastMovementTime = Date.now();
+    function applyDistortion() {
+      const pos_arr = geo.attributes.position.array;
+
+      for (let i = 0; i < VISIBLE_RINGS; i++) {
+        const distortWave = Math.sin(i * 0.08 + distortionAmount * 2) * distortionAmount;
+
+        for (let j = 0; j < SEG; j++) {
+          const angle = (j / SEG) * Math.PI * 2;
+          const radiusScale = 1 + distortWave * Math.sin(angle * 4);
+
+          const ring = generateRing(ringOffset + i);
+          const baseX = ring.verts[j * 3];
+          const baseY = ring.verts[j * 3 + 1];
+          const baseZ = ring.verts[j * 3 + 2] - distanceAccum;
+
+          const distX = Math.cos(angle) * RADIUS * (radiusScale - 1);
+          const distY = Math.sin(angle) * RADIUS * (radiusScale - 1);
+
+          const idx = (i * SEG + j) * 3;
+          pos_arr[idx] = baseX + distX;
+          pos_arr[idx + 1] = baseY + distY;
+          pos_arr[idx + 2] = baseZ;
+        }
+      }
+
+      geo.attributes.position.needsUpdate = true;
     }
 
-    // Mouse
-    renderer.domElement.addEventListener('mousedown', () => {
-      isInteracting = true;
-      triggerDistortion(0.7);
-    });
+    // ---------- input ----------
+    renderer.domElement.addEventListener('mousedown', () => { targetDistortion = 0.7; lastDistortionTime = Date.now(); });
+    renderer.domElement.addEventListener('mousemove', (e) => { if (e.buttons) { targetDistortion = 0.8; lastDistortionTime = Date.now(); } });
+    renderer.domElement.addEventListener('touchstart', () => { targetDistortion = 0.7; lastDistortionTime = Date.now(); }, { passive: true });
+    renderer.domElement.addEventListener('touchmove', () => { targetDistortion = 0.8; lastDistortionTime = Date.now(); }, { passive: true });
 
-    renderer.domElement.addEventListener('mousemove', (e) => {
-      if (!isInteracting) return;
-      triggerDistortion(0.8);
-    });
-
-    renderer.domElement.addEventListener('mouseup', () => {
-      isInteracting = false;
-    });
-
-    renderer.domElement.addEventListener('mouseleave', () => {
-      isInteracting = false;
-    });
-
-    // Touch
-    renderer.domElement.addEventListener('touchstart', (e) => {
-      isInteracting = true;
-      triggerDistortion(0.7);
-    }, { passive: true });
-
-    renderer.domElement.addEventListener('touchmove', (e) => {
-      if (!isInteracting) return;
-      triggerDistortion(0.8);
-    }, { passive: true });
-
-    renderer.domElement.addEventListener('touchend', () => {
-      isInteracting = false;
-    }, { passive: true });
-
-    renderer.domElement.addEventListener('touchcancel', () => {
-      isInteracting = false;
-    }, { passive: true });
-
-    // ---------- giroscópio ----------
+    // ---------- gyroscope ----------
     let gyroX = 0, gyroY = 0;
-    const gyroSmoothing = 0.08;
-
     if (window.DeviceOrientationEvent) {
       window.addEventListener('deviceorientation', (e) => {
-        const beta = e.beta || 0;
-        const gamma = e.gamma || 0;
-
-        gyroY = gyroY * (1 - gyroSmoothing) + (gamma / 5) * gyroSmoothing;
-        gyroX = gyroX * (1 - gyroSmoothing) + (beta / 5) * gyroSmoothing;
-
-        gyroX = Math.max(-8, Math.min(8, gyroX));
-        gyroY = Math.max(-8, Math.min(8, gyroY));
+        gyroY = gyroY * 0.92 + (e.gamma || 0) / 5 * 0.08;
+        gyroX = gyroX * 0.92 + (e.beta || 0) / 5 * 0.08;
       }, true);
     }
 
@@ -228,84 +172,44 @@
       renderer.setSize(window.innerWidth, window.innerHeight);
     });
 
-    // ---------- animation loop @ 60fps ----------
-    const SPEED = 1.2; // velocidade rápida de voo (tobogã)
-    const UPDATE_THRESHOLD = SPACING * 2; // atualizar a cada 2 anéis de distância
-    let cameraZAccum = 0; // acumulador de distância para atualização
-    let ringStartIndex = 0;
-
-    function updateTunnelGeometry() {
-      // Atualizar os vértices e cores da geometria sliding window
-      const positions_arr = geo.attributes.position.array;
-      const colors_arr = geo.attributes.color.array;
-
-      for (let i = 0; i < VISIBLE_RINGS; i++) {
-        const ring = generateRingGeometry(ringStartIndex + i);
-        const verts = ring.verts;
-        const cols = ring.cols;
-
-        for (let j = 0; j < SEG; j++) {
-          const vertexIdx = (i * SEG + j) * 3;
-          // verts já tem o Z correto da função generateRingGeometry
-          positions_arr[vertexIdx] = verts[j * 3];
-          positions_arr[vertexIdx + 1] = verts[j * 3 + 1];
-          positions_arr[vertexIdx + 2] = verts[j * 3 + 2] - cameraZAccum;
-
-          colors_arr[vertexIdx] = cols[j * 3];
-          colors_arr[vertexIdx + 1] = cols[j * 3 + 1];
-          colors_arr[vertexIdx + 2] = cols[j * 3 + 2];
-        }
-      }
-
-      geo.attributes.position.needsUpdate = true;
-      geo.attributes.color.needsUpdate = true;
-    }
+    // ---------- animation ----------
+    const SPEED = 1.2;
 
     function animate() {
       requestAnimationFrame(animate);
 
-      // Câmera voa reto pelo túnel, mantendo posição central
-      // com leve influência do giroscópio
-      camera.position.x = gyroY * 0.3;
-      camera.position.y = gyroX * 0.3;
-      camera.position.z = 0; // sempre no centro
+      // Movimento
+      distanceAccum += SPEED;
 
-      // Avançar continuamente e acumular para atualização
-      cameraZAccum += SPEED;
-
-      // Atualizar geometria quando passar pelo threshold
-      if (cameraZAccum >= UPDATE_THRESHOLD) {
-        const ringsToAdvance = Math.floor(cameraZAccum / SPACING);
-        ringStartIndex += ringsToAdvance;
-        cameraZAccum -= ringsToAdvance * SPACING;
-        updateTunnelGeometry();
+      if (distanceAccum >= UPDATE_DISTANCE) {
+        const advance = Math.floor(distanceAccum / SPACING);
+        ringOffset += advance;
+        distanceAccum -= advance * SPACING;
+        updateGeometry();
       }
 
-      // Olhar para frente no túnel
+      // Câmera
+      camera.position.x = gyroY * 0.3;
+      camera.position.y = gyroX * 0.3;
+      camera.position.z = 0;
       camera.lookAt(0, 0, -20);
 
-      // Rotação do túnel (acompanha o movimento)
-      tunnel.rotation.z += 0.003;
-
-      // Animação contínua de cores
-      const baseWave = Math.sin(performance.now() * 0.0003) * 0.1;
-      colorWaveOffset = baseWave;
-
-      // Animação de distorção: interpolação suave para voltar ao normal
+      // Distorção
       const now = Date.now();
-      const timeSinceMovement = now - lastMovementTime;
+      const timeSince = now - lastDistortionTime;
 
-      if (timeSinceMovement < DISTORTION_DECAY_DURATION) {
-        // Ainda está no período de decay - interpolar com easing cubic
-        const progress = timeSinceMovement / DISTORTION_DECAY_DURATION;
-        const easing = 1 - Math.pow(1 - progress, 3); // cubic ease-out
-        distortionAmount = targetDistortionAmount * (1 - easing);
+      if (timeSince < DISTORTION_DURATION) {
+        const progress = timeSince / DISTORTION_DURATION;
+        const easing = 1 - Math.pow(1 - progress, 3);
+        distortionAmount = targetDistortion * (1 - easing);
+        applyDistortion();
       } else {
-        // Além do decay time - manter em 0
         distortionAmount = 0;
       }
 
-      updateTunnelEffects();
+      // Cores e rotação
+      const baseWave = Math.sin(Date.now() * 0.0003) * 0.1;
+      tunnel.rotation.z += 0.003;
 
       renderer.render(scene, camera);
     }
