@@ -45,7 +45,8 @@
 
     function generateRingGeometry(ringIndex) {
       // Gera geometria de um anel específico da trajetória infinita
-      const z = ringIndex * SPACING; // sem negativo - será ajustado depois
+      // ringIndex aumenta conforme avança, Z negativo conforme se afasta da câmera
+      const z = -ringIndex * SPACING;
 
       const mainCurveX = Math.sin(ringIndex * 0.08) * 6 + Math.sin(ringIndex * 0.02) * 4;
       const mainCurveY = Math.cos(ringIndex * 0.06) * 5 + Math.sin(ringIndex * 0.03) * 4 + Math.cos(ringIndex * 0.01) * 3;
@@ -72,10 +73,10 @@
       return { verts, cols };
     }
 
-    // Gerar anéis iniciais
+    // Gerar anéis iniciais (começam no index 0)
     let ringStartIndex = 0;
     for (let i = 0; i < VISIBLE_RINGS; i++) {
-      const ring = generateRingGeometry(i);
+      const ring = generateRingGeometry(ringStartIndex + i);
       positions.push(...ring.verts);
       colors.push(...ring.cols);
     }
@@ -245,9 +246,10 @@
 
         for (let j = 0; j < SEG; j++) {
           const vertexIdx = (i * SEG + j) * 3;
+          // verts já tem o Z correto da função generateRingGeometry
           positions_arr[vertexIdx] = verts[j * 3];
           positions_arr[vertexIdx + 1] = verts[j * 3 + 1];
-          positions_arr[vertexIdx + 2] = verts[j * 3 + 2] - cameraZAccum; // offset da câmera
+          positions_arr[vertexIdx + 2] = verts[j * 3 + 2] - cameraZAccum;
 
           colors_arr[vertexIdx] = cols[j * 3];
           colors_arr[vertexIdx + 1] = cols[j * 3 + 1];
