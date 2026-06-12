@@ -73,22 +73,52 @@
     const tunnel = new THREE.LineSegments(geo, mat);
     scene.add(tunnel);
 
+    // ---------- color wave animation ----------
+    let colorWaveOffset = 0;
+    let isSwipingNow = false;
+
+    function updateColorWave() {
+      const positions_arr = geo.attributes.position.array;
+      const colors_arr = geo.attributes.color.array;
+
+      for (let i = 0; i < RINGS; i++) {
+        const z = -i * SPACING;
+        const depth = i / RINGS;
+
+        // Onda de cor: muda de acordo com o offset do swipe
+        const hueShift = (depth + colorWaveOffset * 0.3) % 1;
+
+        for (let j = 0; j < SEG; j++) {
+          const colorIdx = (i * SEG + j) * 3;
+          const hue = 0.55 + hueShift * 0.3;
+          const c = new THREE.Color().setHSL(hue, 1.0, 0.25 + (1 - depth) * 0.45);
+          colors_arr[colorIdx] = c.r;
+          colors_arr[colorIdx + 1] = c.g;
+          colors_arr[colorIdx + 2] = c.b;
+        }
+      }
+      geo.attributes.color.needsUpdate = true;
+    }
+
     // ---------- line detection system ----------
     let isDrawing = false;
     let startY = 0;
     let lastLineTime = 0;
     const MIN_HEIGHT = window.innerHeight * 0.5;
-    const LINE_TIMEOUT = 750;
+    const LINE_TIMEOUT = 1500;
 
     function startLine(e) {
       const y = e.touches ? e.touches[0].clientY : e.clientY;
       isDrawing = true;
+      isSwipingNow = true;
       startY = y;
+      colorWaveOffset = 0;
     }
 
     function endLine(e) {
       if (!isDrawing) return;
       isDrawing = false;
+      isSwipingNow = false;
 
       const y = e.touches ? e.changedTouches[0].clientY : e.clientY;
       const distance = Math.abs(y - startY);
@@ -100,14 +130,15 @@
         if (timeSinceLastLine < LINE_TIMEOUT) {
           // Segunda linha dentro do timeout - vai para WB
           console.log('Double line - navigate to WB');
+          isSwipingNow = false;
           window.location.href = 'wb-simulator.html';
         } else {
-          // Primeira linha - aguarda 750ms para ver se tem segunda
+          // Primeira linha - aguarda 1500ms para ver se tem segunda
           lastLineTime = now;
-          console.log('Single line - waiting 750ms');
+          console.log('Single line - waiting 1500ms');
 
           setTimeout(() => {
-            if ((Date.now() - lastLineTime) >= LINE_TIMEOUT) {
+            if ((Date.now() - lastLineTime) >= LINE_TIMEOUT && !isSwipingNow) {
               console.log('Timeout - navigate to Pixel Lab');
               window.location.href = 'pixel-lab.html';
             }
@@ -116,10 +147,20 @@
       }
     }
 
+    function onSwipeMove(e) {
+      if (!isSwipingNow) return;
+      const y = e.touches ? e.touches[0].clientY : e.clientY;
+      const distance = Math.abs(y - startY);
+      colorWaveOffset = distance / window.innerHeight;
+      updateColorWave();
+    }
+
     const el = renderer.domElement;
     el.addEventListener('mousedown', startLine);
+    el.addEventListener('mousemove', onSwipeMove);
     el.addEventListener('mouseup', endLine);
     el.addEventListener('touchstart', startLine, { passive: true });
+    el.addEventListener('touchmove', onSwipeMove, { passive: true });
     el.addEventListener('touchend', endLine, { passive: true });
 
     window.addEventListener('resize', () => {
