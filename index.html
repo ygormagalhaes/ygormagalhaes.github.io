@@ -18,7 +18,6 @@
 <body>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
   <script>
-    // Setup Three.js
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
     const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -27,31 +26,75 @@
     renderer.setClearColor(0x000000);
     document.body.appendChild(renderer.domElement);
 
-    camera.position.z = 0;
+    camera.position.z = 5;
 
-    // Criar buraco de minhoca
-    const rings = [];
-    const ringCount = 50;
-    const segmentsPerRing = 128;
+    // Criar malha do buraco de minhoca com superfície
+    const tubeSegments = 60;
+    const tubeRadius = 30;
+    const circleSegments = 64;
 
-    for (let i = 0; i < ringCount; i++) {
-      const points = [];
-      const zPos = (i - ringCount / 2) * 0.8;
-      const radius = 1 + (i / ringCount) * 4;
+    // Array para armazenar vértices e índices
+    const vertices = [];
+    const indices = [];
 
-      for (let j = 0; j <= segmentsPerRing; j++) {
-        const angle = (j / segmentsPerRing) * Math.PI * 2;
-        const x = Math.cos(angle) * radius;
-        const y = Math.sin(angle) * radius;
-        points.push(new THREE.Vector3(x, y, zPos));
+    for (let i = 0; i < tubeSegments; i++) {
+      const z = (i - tubeSegments / 2) * 0.5;
+      const radiusScale = 0.5 + (i / tubeSegments) * 1.5;
+
+      for (let j = 0; j < circleSegments; j++) {
+        const angle = (j / circleSegments) * Math.PI * 2;
+        const x = Math.cos(angle) * radiusScale;
+        const y = Math.sin(angle) * radiusScale;
+        vertices.push(x, y, z);
       }
-
-      const geometry = new THREE.BufferGeometry().setFromPoints(points);
-      const material = new THREE.LineBasicMaterial({ color: 0x00ffff });
-      const line = new THREE.Line(geometry, material);
-      scene.add(line);
-      rings.push({ line, initialZ: zPos });
     }
+
+    // Criar índices para wireframe (linhas entre vértices)
+    for (let i = 0; i < tubeSegments - 1; i++) {
+      for (let j = 0; j < circleSegments; j++) {
+        const current = i * circleSegments + j;
+        const next = i * circleSegments + (j + 1) % circleSegments;
+        const below = (i + 1) * circleSegments + j;
+        const belowNext = (i + 1) * circleSegments + (j + 1) % circleSegments;
+
+        // Linhas horizontais (círculos)
+        indices.push(current, next);
+        // Linhas verticais (conectores)
+        indices.push(current, below);
+      }
+    }
+
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(vertices), 3));
+    geometry.setIndex(new THREE.BufferAttribute(new Uint32Array(indices), 1));
+
+    // Material com gradiente de cores
+    const material = new THREE.LineBasicMaterial({
+      color: 0x0088ff,
+      linewidth: 1,
+      fog: false
+    });
+
+    const wormhole = new THREE.LineSegments(geometry, material);
+    scene.add(wormhole);
+
+    // Adicionar pontos brilhantes (particles)
+    const particleGeometry = new THREE.BufferGeometry();
+    const particlePositions = [];
+    for (let i = 0; i < 100; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const z = (Math.random() - 0.5) * tubeSegments * 0.5;
+      const radius = 0.7 + Math.random() * 0.8;
+      particlePositions.push(
+        Math.cos(angle) * radius,
+        Math.sin(angle) * radius,
+        z
+      );
+    }
+    particleGeometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(particlePositions), 3));
+    const particleMaterial = new THREE.PointsMaterial({ color: 0xffffff, size: 0.15 });
+    const particles = new THREE.Points(particleGeometry, particleMaterial);
+    scene.add(particles);
 
     // Gesture recognition
     let isDrawing = false;
@@ -61,15 +104,12 @@
 
     function normalizeStroke(points) {
       if (points.length < 2) return null;
-
       const minX = Math.min(...points.map(p => p.x));
       const maxX = Math.max(...points.map(p => p.x));
       const minY = Math.min(...points.map(p => p.y));
       const maxY = Math.max(...points.map(p => p.y));
-
       const width = maxX - minX || 1;
       const height = maxY - minY || 1;
-
       return points.map(p => ({
         x: (p.x - minX) / width,
         y: (p.y - minY) / height
@@ -78,7 +118,6 @@
 
     function recognize(normalized) {
       if (!normalized || normalized.length < 5) return null;
-
       let curveScore = 0;
       for (let i = 1; i < normalized.length - 1; i++) {
         const dx = normalized[i + 1].x - normalized[i].x;
@@ -88,37 +127,21 @@
         curveScore += Math.abs(dx * py - dy * px);
       }
       curveScore /= normalized.length;
-
       const heights = normalized.map(p => p.y);
-      const minH = Math.min(...heights);
-      const maxH = Math.max(...heights);
-      const isVertical = (maxH - minH) > 0.4;
-
+      const isVertical = (Math.max(...heights) - Math.min(...heights)) > 0.4;
       const widths = normalized.map(p => p.x);
-      const minW = Math.min(...widths);
-      const maxW = Math.max(...widths);
-      const isWide = (maxW - minW) > 0.5;
+      const isWide = (Math.max(...widths) - Math.min(...widths)) > 0.5;
 
-      if (curveScore > 0.06 && isVertical && normalized[0].x < 0.4) {
-        return 'P';
-      }
-
-      if (curveScore > 0.12 && isWide && isVertical) {
-        return 'W';
-      }
-
+      if (curveScore > 0.06 && isVertical && normalized[0].x < 0.4) return 'P';
+      if (curveScore > 0.12 && isWide && isVertical) return 'W';
       return null;
     }
 
     function handleGesture() {
       const normalized = normalizeStroke(strokePoints);
       const char = recognize(normalized);
-
-      if (char === 'P') {
-        window.location.href = 'pixel-lab.html';
-      } else if (char === 'W') {
-        window.location.href = 'simulador-wb-xt30ii.html';
-      }
+      if (char === 'P') window.location.href = 'pixel-lab.html';
+      else if (char === 'W') window.location.href = 'simulador-wb-xt30ii.html';
     }
 
     renderer.domElement.addEventListener('mousedown', (e) => {
@@ -131,22 +154,20 @@
 
     renderer.domElement.addEventListener('mousemove', (e) => {
       if (!isDrawing) return;
-      const x = e.clientX;
-      const y = e.clientY;
-      const dist = Math.hypot(x - lastX, y - lastY);
-
+      const dist = Math.hypot(e.clientX - lastX, e.clientY - lastY);
       if (dist > threshold) {
-        strokePoints.push({ x, y });
-        lastX = x;
-        lastY = y;
+        strokePoints.push({ x: e.clientX, y: e.clientY });
+        lastX = e.clientX;
+        lastY = e.clientY;
       }
     });
 
     renderer.domElement.addEventListener('mouseup', () => {
-      if (!isDrawing) return;
-      isDrawing = false;
-      handleGesture();
-      strokePoints = [];
+      if (isDrawing) {
+        isDrawing = false;
+        handleGesture();
+        strokePoints = [];
+      }
     });
 
     renderer.domElement.addEventListener('touchstart', (e) => {
@@ -162,22 +183,20 @@
       if (!isDrawing) return;
       e.preventDefault();
       const touch = e.touches[0];
-      const x = touch.clientX;
-      const y = touch.clientY;
-      const dist = Math.hypot(x - lastX, y - lastY);
-
+      const dist = Math.hypot(touch.clientX - lastX, touch.clientY - lastY);
       if (dist > threshold) {
-        strokePoints.push({ x, y });
-        lastX = x;
-        lastY = y;
+        strokePoints.push({ x: touch.clientX, y: touch.clientY });
+        lastX = touch.clientX;
+        lastY = touch.clientY;
       }
     });
 
     renderer.domElement.addEventListener('touchend', () => {
-      if (!isDrawing) return;
-      isDrawing = false;
-      handleGesture();
-      strokePoints = [];
+      if (isDrawing) {
+        isDrawing = false;
+        handleGesture();
+        strokePoints = [];
+      }
     });
 
     window.addEventListener('resize', () => {
@@ -186,22 +205,27 @@
       renderer.setSize(window.innerWidth, window.innerHeight);
     });
 
-    // Animation loop
+    let time = 0;
     function animate() {
       requestAnimationFrame(animate);
+      time += 0.016;
 
-      const time = Date.now() * 0.0008;
+      // Rotacionar o wormhole
+      wormhole.rotation.z = time * 0.2;
 
-      rings.forEach((item) => {
-        item.line.position.z = item.initialZ + time * 20;
-
-        if (item.line.position.z > 50) {
-          item.line.position.z -= ringCount * 0.8;
+      // Animar partículas
+      const positions = particles.geometry.attributes.position.array;
+      for (let i = 0; i < positions.length; i += 3) {
+        positions[i + 2] += 0.08;
+        if (positions[i + 2] > tubeSegments * 0.25) {
+          positions[i + 2] = -tubeSegments * 0.25;
         }
+      }
+      particles.geometry.attributes.position.needsUpdate = true;
 
-        const opacity = 0.2 + 0.8 * Math.abs(Math.sin(item.line.position.z * 0.1));
-        item.line.material.opacity = opacity;
-      });
+      // Variar cor da malha
+      const hue = (time * 0.1) % 1;
+      material.color.setHSL(hue, 1, 0.4);
 
       renderer.render(scene, camera);
     }
