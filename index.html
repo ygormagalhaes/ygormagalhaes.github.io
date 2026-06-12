@@ -143,47 +143,52 @@
       geo.attributes.color.needsUpdate = true;
     }
 
-    // ---------- acelerômetro/distorção ----------
-    let lastAccelX = 0;
-    let lastAccelY = 0;
-    let lastAccelZ = 0;
-    const MOVEMENT_THRESHOLD = 8; // m/s² - para disparar distorção (reduzido para teste)
+    // ---------- touch/mouse input para distorção ----------
+    let isInteracting = false;
+    let lastInteractionTime = 0;
 
-    if (window.DeviceMotionEvent) {
-      const handleMotion = (e) => {
-        const accel = e.acceleration;
-        if (!accel) return;
-
-        const ax = accel.x || 0;
-        const ay = accel.y || 0;
-        const az = accel.z || 0;
-
-        // Calcular magnitude da aceleração
-        const magnitude = Math.sqrt(ax * ax + ay * ay + az * az);
-
-        console.log('Aceleração:', magnitude.toFixed(2), 'ax:', ax.toFixed(2), 'ay:', ay.toFixed(2), 'az:', az.toFixed(2));
-
-        // Movimento detectado - aplicar distorção
-        if (magnitude > MOVEMENT_THRESHOLD) {
-          targetDistortionAmount = Math.min(1, magnitude / 30);
-          lastMovementTime = Date.now();
-          console.log('Distorção acionada:', targetDistortionAmount.toFixed(2));
-        }
-
-        lastAccelX = ax;
-        lastAccelY = ay;
-        lastAccelZ = az;
-      };
-
-      window.addEventListener('devicemotion', handleMotion);
-
-      // Fallback: toque na tela para ativar distorção (para testes em desktop)
-      renderer.domElement.addEventListener('click', () => {
-        targetDistortionAmount = 0.6;
-        lastMovementTime = Date.now();
-        console.log('Distorção ativada por toque');
-      });
+    function triggerDistortion(intensity = 0.8) {
+      targetDistortionAmount = Math.min(1, intensity);
+      lastMovementTime = Date.now();
     }
+
+    // Mouse
+    renderer.domElement.addEventListener('mousedown', () => {
+      isInteracting = true;
+      triggerDistortion(0.7);
+    });
+
+    renderer.domElement.addEventListener('mousemove', (e) => {
+      if (!isInteracting) return;
+      triggerDistortion(0.8);
+    });
+
+    renderer.domElement.addEventListener('mouseup', () => {
+      isInteracting = false;
+    });
+
+    renderer.domElement.addEventListener('mouseleave', () => {
+      isInteracting = false;
+    });
+
+    // Touch
+    renderer.domElement.addEventListener('touchstart', (e) => {
+      isInteracting = true;
+      triggerDistortion(0.7);
+    }, { passive: true });
+
+    renderer.domElement.addEventListener('touchmove', (e) => {
+      if (!isInteracting) return;
+      triggerDistortion(0.8);
+    }, { passive: true });
+
+    renderer.domElement.addEventListener('touchend', () => {
+      isInteracting = false;
+    }, { passive: true });
+
+    renderer.domElement.addEventListener('touchcancel', () => {
+      isInteracting = false;
+    }, { passive: true });
 
     // ---------- giroscópio ----------
     let gyroX = 0, gyroY = 0;
