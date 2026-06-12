@@ -19,62 +19,73 @@
   <script src="three.min.js"></script>
   <script>
     const scene = new THREE.Scene();
-    scene.fog = new THREE.FogExp2(0x000000, 0.015);
+    // Fog hides the far end of the loop so the tunnel reads as infinite depth.
+    scene.fog = new THREE.FogExp2(0x000000, 0.045);
 
-    const camera = new THREE.PerspectiveCamera(85, window.innerWidth / window.innerHeight, 0.1, 1000);
-    const renderer = new THREE.WebGLRenderer({ antialias: true, precision: 'highp', powerPreference: 'high-performance' });
-    renderer.setPixelRatio(window.devicePixelRatio);
+    const camera = new THREE.PerspectiveCamera(90, window.innerWidth / window.innerHeight, 0.1, 1000);
+    const BASE_FOV = 90;
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.setClearColor(0x000000);
     document.body.appendChild(renderer.domElement);
 
-    // ---------- tunnel parameters ----------
-    const VISIBLE_RINGS = 80;
-    const SEG = 96;
-    const SPACING = 1.8;
-    const RADIUS = 6.5;
+    // ---------- tunnel path (closed loop = truly infinite, never restarts) ----------
+    // Big, highly displaced control points -> very sinuous, sharply curving centreline.
+    const CTRL_POINTS = 28;
+    const pathPoints = [];
+    for (let i = 0; i < CTRL_POINTS; i++) {
+      const a = (i / CTRL_POINTS) * Math.PI * 2;
+      const x = Math.cos(a) * 90 + Math.sin(a * 3) * 55 + Math.cos(a * 6) * 30;
+      const y = Math.sin(a) * 90 + Math.cos(a * 4) * 55 + Math.sin(a * 7) * 30;
+      const z = Math.sin(a * 2) * 80 + Math.cos(a * 5) * 45 + Math.sin(a * 9) * 22;
+      pathPoints.push(new THREE.Vector3(x, y, z));
+    }
 
+    // closed=true makes the loop seamless; tension 0.5 keeps the turns tight and winding.
+    const curve = new THREE.CatmullRomCurve3(pathPoints, true, 'catmullrom', 0.5);
+    const CURVE_LENGTH = curve.getLength();
+
+    // ---------- tube geometry built as clean rings + rails ----------
+    const TUBULAR = 700;   // rings along the length
+    const RADIAL = 24;     // segments around each ring
+    const TUBE_RADIUS = 4.0;
+
+    const frames = curve.computeFrenetFrames(TUBULAR, true);
     const positions = [];
     const colors = [];
     const color = new THREE.Color();
 
-    function generateRing(ringIndex) {
-      const z = -ringIndex * SPACING;
-      const mainCurveX = Math.sin(ringIndex * 0.08) * 6 + Math.sin(ringIndex * 0.02) * 4;
-      const mainCurveY = Math.cos(ringIndex * 0.06) * 5 + Math.sin(ringIndex * 0.03) * 4 + Math.cos(ringIndex * 0.01) * 3;
-      const loopX = Math.sin(ringIndex * 0.15) * 2;
-      const loopY = Math.cos(ringIndex * 0.12) * 2;
+    const P = new THREE.Vector3();
+    for (let i = 0; i <= TUBULAR; i++) {
+      const u = i / TUBULAR;
+      curve.getPointAt(u % 1, P);
+      const N = frames.normals[i % TUBULAR];
+      const B = frames.binormals[i % TUBULAR];
 
-      const verts = [];
-      const cols = [];
+      // colour band sweeping along the tunnel (cyan / magenta / violet range)
+      const hue = (0.55 + u * 1.5) % 1;
+      color.setHSL(hue, 1.0, 0.55);
 
-      for (let j = 0; j < SEG; j++) {
-        const a = (j / SEG) * Math.PI * 2;
-        const x = Math.cos(a) * RADIUS + mainCurveX + loopX;
-        const y = Math.sin(a) * RADIUS + mainCurveY + loopY;
-        verts.push(x, y, z);
-
-        const hue = (0.5 + (ringIndex % 200) * 0.002) % 1;
-        color.setHSL(hue, 1.0, 0.4);
-        cols.push(color.r, color.g, color.b);
+      for (let j = 0; j < RADIAL; j++) {
+        const v = (j / RADIAL) * Math.PI * 2;
+        const cx = Math.cos(v), sy = Math.sin(v);
+        const x = P.x + TUBE_RADIUS * (cx * N.x + sy * B.x);
+        const y = P.y + TUBE_RADIUS * (cx * N.y + sy * B.y);
+        const z = P.z + TUBE_RADIUS * (cx * N.z + sy * B.z);
+        positions.push(x, y, z);
+        colors.push(color.r, color.g, color.b);
       }
-      return { verts, cols };
-    }
-
-    // Gerar geometria inicial
-    for (let i = 0; i < VISIBLE_RINGS; i++) {
-      const ring = generateRing(i);
-      positions.push(...ring.verts);
-      colors.push(...ring.cols);
     }
 
     const idx = [];
-    for (let i = 0; i < VISIBLE_RINGS; i++) {
-      for (let j = 0; j < SEG; j++) {
-        const cur = i * SEG + j;
-        const nextJ = i * SEG + (j + 1) % SEG;
-        idx.push(cur, nextJ);
-        if (i < VISIBLE_RINGS - 1) idx.push(cur, cur + SEG);
+    for (let i = 0; i <= TUBULAR; i++) {
+      for (let j = 0; j < RADIAL; j++) {
+        const cur = i * RADIAL + j;
+        const nextJ = i * RADIAL + (j + 1) % RADIAL;
+        idx.push(cur, nextJ);                       // radial ring
+        if (i < TUBULAR) idx.push(cur, cur + RADIAL); // longitudinal rail
       }
     }
 
@@ -83,79 +94,30 @@
     geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
     geo.setIndex(idx);
 
-    const mat = new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.95, fog: true });
+    const mat = new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.9, fog: true });
     const tunnel = new THREE.LineSegments(geo, mat);
     scene.add(tunnel);
 
-    // ---------- sliding window system ----------
-    let ringOffset = 0;
-    let distanceAccum = 0;
-    const UPDATE_DISTANCE = SPACING * 3;
+    // ---------- camera travel along the curve ----------
+    let travel = 0;                 // 0..1 position along the closed loop
+    const MOVE_SPEED = 5;           // world units per frame
+    const tStep = MOVE_SPEED / CURVE_LENGTH;
 
-    function updateGeometry() {
-      const pos_arr = geo.attributes.position.array;
-      const col_arr = geo.attributes.color.array;
+    const camPos = new THREE.Vector3();
+    const lookPos = new THREE.Vector3();
+    const tangent = new THREE.Vector3();
 
-      for (let i = 0; i < VISIBLE_RINGS; i++) {
-        const ring = generateRing(ringOffset + i);
-        const verts = ring.verts;
-        const cols = ring.cols;
-
-        for (let j = 0; j < SEG; j++) {
-          const idx = (i * SEG + j) * 3;
-          pos_arr[idx] = verts[j * 3];
-          pos_arr[idx + 1] = verts[j * 3 + 1];
-          pos_arr[idx + 2] = verts[j * 3 + 2] - distanceAccum;
-
-          col_arr[idx] = cols[j * 3];
-          col_arr[idx + 1] = cols[j * 3 + 1];
-          col_arr[idx + 2] = cols[j * 3 + 2];
-        }
-      }
-
-      geo.attributes.position.needsUpdate = true;
-      geo.attributes.color.needsUpdate = true;
-    }
-
-    // ---------- distortion ----------
-    let distortionAmount = 0;
+    // ---------- interactive distortion (camera-side, cheap) ----------
+    let distortion = 0;             // current 0..1
     let targetDistortion = 0;
-    let lastDistortionTime = 0;
-    const DISTORTION_DURATION = 500;
+    let lastInput = -10000;
+    const DISTORTION_DURATION = 600;
 
-    function applyDistortion() {
-      const pos_arr = geo.attributes.position.array;
-
-      for (let i = 0; i < VISIBLE_RINGS; i++) {
-        const distortWave = Math.sin(i * 0.08 + distortionAmount * 2) * distortionAmount;
-
-        for (let j = 0; j < SEG; j++) {
-          const angle = (j / SEG) * Math.PI * 2;
-          const radiusScale = 1 + distortWave * Math.sin(angle * 4);
-
-          const ring = generateRing(ringOffset + i);
-          const baseX = ring.verts[j * 3];
-          const baseY = ring.verts[j * 3 + 1];
-          const baseZ = ring.verts[j * 3 + 2] - distanceAccum;
-
-          const distX = Math.cos(angle) * RADIUS * (radiusScale - 1);
-          const distY = Math.sin(angle) * RADIUS * (radiusScale - 1);
-
-          const idx = (i * SEG + j) * 3;
-          pos_arr[idx] = baseX + distX;
-          pos_arr[idx + 1] = baseY + distY;
-          pos_arr[idx + 2] = baseZ;
-        }
-      }
-
-      geo.attributes.position.needsUpdate = true;
-    }
-
-    // ---------- input ----------
-    renderer.domElement.addEventListener('mousedown', () => { targetDistortion = 0.7; lastDistortionTime = Date.now(); });
-    renderer.domElement.addEventListener('mousemove', (e) => { if (e.buttons) { targetDistortion = 0.8; lastDistortionTime = Date.now(); } });
-    renderer.domElement.addEventListener('touchstart', () => { targetDistortion = 0.7; lastDistortionTime = Date.now(); }, { passive: true });
-    renderer.domElement.addEventListener('touchmove', () => { targetDistortion = 0.8; lastDistortionTime = Date.now(); }, { passive: true });
+    function pulse(strength) { targetDistortion = strength; lastInput = Date.now(); }
+    renderer.domElement.addEventListener('mousedown', () => pulse(0.8));
+    renderer.domElement.addEventListener('mousemove', (e) => { if (e.buttons) pulse(0.9); });
+    renderer.domElement.addEventListener('touchstart', () => pulse(0.8), { passive: true });
+    renderer.domElement.addEventListener('touchmove', () => pulse(0.9), { passive: true });
 
     // ---------- gyroscope ----------
     let gyroX = 0, gyroY = 0;
@@ -173,43 +135,43 @@
     });
 
     // ---------- animation ----------
-    const SPEED = 1.2;
+    let roll = 0;
 
     function animate() {
       requestAnimationFrame(animate);
 
-      // Movimento
-      distanceAccum += SPEED;
+      // advance, wrapping around the closed loop -> never ends, never restarts visibly
+      travel = (travel + tStep) % 1;
 
-      if (distanceAccum >= UPDATE_DISTANCE) {
-        const advance = Math.floor(distanceAccum / SPACING);
-        ringOffset += advance;
-        distanceAccum -= advance * SPACING;
-        updateGeometry();
-      }
+      // place camera on the centreline, looking a little further down the path
+      curve.getPointAt(travel, camPos);
+      curve.getTangentAt(travel, tangent);
+      lookPos.copy(camPos).add(tangent);
 
-      // Câmera
-      camera.position.x = gyroY * 0.3;
-      camera.position.y = gyroX * 0.3;
-      camera.position.z = 0;
-      camera.lookAt(0, 0, -20);
-
-      // Distorção
-      const now = Date.now();
-      const timeSince = now - lastDistortionTime;
-
-      if (timeSince < DISTORTION_DURATION) {
-        const progress = timeSince / DISTORTION_DURATION;
+      // distortion easing
+      const since = Date.now() - lastInput;
+      if (since < DISTORTION_DURATION) {
+        const progress = since / DISTORTION_DURATION;
         const easing = 1 - Math.pow(1 - progress, 3);
-        distortionAmount = targetDistortion * (1 - easing);
-        applyDistortion();
+        distortion = targetDistortion * (1 - easing);
       } else {
-        distortionAmount = 0;
+        distortion = 0;
       }
 
-      // Cores e rotação
-      const baseWave = Math.sin(Date.now() * 0.0003) * 0.1;
-      tunnel.rotation.z += 0.003;
+      camera.position.copy(camPos);
+      camera.lookAt(lookPos);
+
+      // barrel-roll spin + extra spin while distorting
+      roll += 0.004 + distortion * 0.05;
+      camera.rotateZ(roll);
+
+      // lateral pan from gyroscope (in camera-local space)
+      camera.translateX(gyroY * 0.4);
+      camera.translateY(gyroX * 0.4);
+
+      // FOV punch + speed-wobble on interaction
+      camera.fov = BASE_FOV + Math.sin(Date.now() * 0.02) * distortion * 12;
+      camera.updateProjectionMatrix();
 
       renderer.render(scene, camera);
     }
