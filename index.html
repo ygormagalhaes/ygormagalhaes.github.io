@@ -104,19 +104,76 @@
     }
 
     function recognize(n) {
-      if (!n || n.length < 5) return null;
+      if (!n || n.length < 3) return null;
+
+      const xs = n.map(p => p.x);
+      const ys = n.map(p => p.y);
+      const minX = Math.min(...xs);
+      const maxX = Math.max(...xs);
+      const minY = Math.min(...ys);
+      const maxY = Math.max(...ys);
+      const width = maxX - minX;
+      const height = maxY - minY;
+
+      // Calcular características do stroke
       let curve = 0;
       for (let i = 1; i < n.length - 1; i++) {
-        const dx = n[i + 1].x - n[i].x, dy = n[i + 1].y - n[i].y;
-        const px = n[i].x - n[i - 1].x, py = n[i].y - n[i - 1].y;
+        const dx = n[i + 1].x - n[i].x;
+        const dy = n[i + 1].y - n[i].y;
+        const px = n[i].x - n[i - 1].x;
+        const py = n[i].y - n[i - 1].y;
         curve += Math.abs(dx * py - dy * px);
       }
-      curve /= n.length;
-      const ys = n.map(p => p.y), xs = n.map(p => p.x);
-      const vertical = (Math.max(...ys) - Math.min(...ys)) > 0.4;
-      const wide = (Math.max(...xs) - Math.min(...xs)) > 0.5;
-      if (curve > 0.06 && vertical && n[0].x < 0.4) return 'P';
-      if (curve > 0.12 && wide && vertical) return 'W';
+      curve /= Math.max(1, n.length);
+
+      const isVertical = height > width * 0.5; // altura > metade da largura
+      const isHorizontal = width > height * 0.5;
+
+      // Contar picos (locais máximos em Y)
+      let peaks = 0;
+      for (let i = 1; i < n.length - 1; i++) {
+        if (n[i].y < n[i - 1].y && n[i].y < n[i + 1].y) peaks++;
+      }
+
+      // Contar mudanças de direção significativas
+      let dirChanges = 0;
+      let lastDir = 0;
+      for (let i = 1; i < n.length; i++) {
+        const dx = n[i].x - n[i - 1].x;
+        const dy = n[i].y - n[i - 1].y;
+        const dir = Math.atan2(dy, dx);
+        if (i > 1 && Math.abs(dir - lastDir) > 0.5) dirChanges++;
+        lastDir = dir;
+      }
+
+      console.log('Curve:', curve.toFixed(3), 'Peaks:', peaks, 'DirChanges:', dirChanges, 'Vertical:', isVertical, 'Width/Height:', (width / height).toFixed(2));
+
+      // P: começar no topo à esquerda, curva no topo (arco), linha reta para baixo
+      // Características: algumas mudanças de direção, não muitos picos, começa alto
+      if (curve > 0.04 && isVertical && n[0].y < 0.3 && dirChanges > 2 && dirChanges < 8) {
+        console.log('→ Matched P');
+        return 'P';
+      }
+
+      // W: múltiplos picos e vales (onda), bem amplo
+      // Características: muitos picos (3+), bem amplo, muitas mudanças de direção
+      if (peaks > 2 && isHorizontal && dirChanges > 6) {
+        console.log('→ Matched W');
+        return 'W';
+      }
+
+      // Fallback mais tolerante para P: só curvatura + vertical
+      if (curve > 0.03 && isVertical && n[0].x < 0.5) {
+        console.log('→ Fallback matched P');
+        return 'P';
+      }
+
+      // Fallback para W: amplo + vertical + muita curvatura
+      if (curve > 0.08 && isHorizontal && isVertical) {
+        console.log('→ Fallback matched W');
+        return 'W';
+      }
+
       return null;
     }
 
