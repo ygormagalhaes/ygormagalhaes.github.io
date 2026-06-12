@@ -23,9 +23,9 @@
   <canvas id="canvas"></canvas>
   <script>
     const canvas = document.getElementById('canvas');
-    const ctx = canvas.getContext('2d');
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
+    const ctx = canvas.getContext('2d');
 
     const centerX = canvas.width / 2;
     const centerY = canvas.height / 2;
@@ -175,38 +175,36 @@
     });
 
     function drawWormhole() {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = '#000';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
       ctx.strokeStyle = '#00ffff';
-      ctx.lineWidth = 1.5;
+      ctx.lineWidth = 1;
 
-      // Desenhar anéis do wormhole
       for (let i = 0; i < ringCount; i++) {
-        const z = (i - ringCount / 2 + time * 8) % ringCount;
-        const normalizedZ = (z + ringCount / 2) / ringCount;
+        const z = (i + time * 12) % ringCount;
+        const depth = (z / ringCount);
 
-        // Raio cresce para frente
-        const baseRadius = 50 + normalizedZ * 300;
+        // Raio cresce para quem vem de trás para frente
+        const maxRadius = Math.min(canvas.width, canvas.height) * 0.4;
+        const baseRadius = maxRadius * (0.2 + depth * 0.8);
 
-        // Opacidade: mais clara no fundo, mais escura na frente
-        const opacity = Math.max(0.1, 1 - Math.abs(normalizedZ - 0.5) * 2);
+        // Opacidade maior na frente
+        const opacity = Math.max(0.15, depth);
         ctx.globalAlpha = opacity;
 
         ctx.beginPath();
 
         for (let j = 0; j <= segmentsPerRing; j++) {
           const angle = (j / segmentsPerRing) * Math.PI * 2;
-
-          // Adicionar pequena oscilação para efeito mais vivo
-          const waveAmount = Math.sin(angle * 4 + time * 2) * 0.05;
-          const radius = baseRadius * (1 + waveAmount);
-
-          const x = centerX + Math.cos(angle) * radius;
-          const y = centerY + Math.sin(angle) * radius;
+          const x = centerX + Math.cos(angle) * baseRadius;
+          const y = centerY + Math.sin(angle) * baseRadius;
 
           if (j === 0) ctx.moveTo(x, y);
           else ctx.lineTo(x, y);
         }
 
+        ctx.closePath();
         ctx.stroke();
       }
 
