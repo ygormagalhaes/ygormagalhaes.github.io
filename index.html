@@ -11,6 +11,7 @@
       height: 100%;
       background: #000;
       overflow: hidden;
+      font-family: monospace;
     }
     canvas {
       display: block;
@@ -20,50 +21,24 @@
 </head>
 <body>
   <canvas id="canvas"></canvas>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
   <script>
     const canvas = document.getElementById('canvas');
-    const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.setClearColor(0x000000);
-    camera.position.z = 0;
+    const ctx = canvas.getContext('2d');
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
 
-    // Criar buraco de minhoca com linhas circulares
-    const lines = [];
-    const ringCount = 60;
-    const segmentsPerRing = 64;
+    const centerX = canvas.width / 2;
+    const centerY = canvas.height / 2;
+    const ringCount = 40;
+    const segmentsPerRing = 128;
 
-    for (let i = 0; i < ringCount; i++) {
-      const geometry = new THREE.BufferGeometry();
-      const points = [];
-      const zPos = i * 0.5 - (ringCount * 0.5) * 0.5;
-      const radius = 1 + (i / ringCount) * 2;
+    let time = 0;
 
-      for (let j = 0; j <= segmentsPerRing; j++) {
-        const angle = (j / segmentsPerRing) * Math.PI * 2;
-        const x = Math.cos(angle) * radius;
-        const y = Math.sin(angle) * radius;
-        points.push(x, y, zPos);
-      }
-
-      geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(points), 3));
-      const material = new THREE.LineBasicMaterial({
-        color: 0x00ffff,
-        linewidth: 1,
-        fog: false
-      });
-      const line = new THREE.Line(geometry, material);
-      scene.add(line);
-      lines.push({ line, initialZ: zPos, radius });
-    }
-
-    // Desenho com mouse
+    // Desenho com mouse/touch
     let isDrawing = false;
     let lastX = 0, lastY = 0;
     let strokePoints = [];
-    const threshold = 20;
+    const threshold = 15;
 
     function normalizeStroke(points) {
       if (points.length < 2) return null;
@@ -85,36 +60,34 @@
     function recognize(normalized) {
       if (!normalized || normalized.length < 5) return null;
 
-      const centerX = 0.5;
-      const getCurve = () => {
-        let curveScore = 0;
-        for (let i = 1; i < normalized.length - 1; i++) {
-          const dx = normalized[i + 1].x - normalized[i].x;
-          const dy = normalized[i + 1].y - normalized[i].y;
-          const px = normalized[i].x - normalized[i - 1].x;
-          const py = normalized[i].y - normalized[i - 1].y;
-          curveScore += Math.abs(dx * py - dy * px);
-        }
-        return curveScore / normalized.length;
-      };
+      // Detectar curvatura
+      let curveScore = 0;
+      for (let i = 1; i < normalized.length - 1; i++) {
+        const dx = normalized[i + 1].x - normalized[i].x;
+        const dy = normalized[i + 1].y - normalized[i].y;
+        const px = normalized[i].x - normalized[i - 1].x;
+        const py = normalized[i].y - normalized[i - 1].y;
+        curveScore += Math.abs(dx * py - dy * px);
+      }
+      curveScore /= normalized.length;
 
-      const isVertical = () => {
-        const heights = normalized.map(p => p.y);
-        const minH = Math.min(...heights);
-        const maxH = Math.max(...heights);
-        return (maxH - minH) > 0.6;
-      };
+      const heights = normalized.map(p => p.y);
+      const minH = Math.min(...heights);
+      const maxH = Math.max(...heights);
+      const isVertical = (maxH - minH) > 0.4;
 
-      const curve = getCurve();
-      const hasVertical = isVertical();
+      const widths = normalized.map(p => p.x);
+      const minW = Math.min(...widths);
+      const maxW = Math.max(...widths);
+      const isWide = (maxW - minW) > 0.5;
 
-      // P: curva no topo, linha vertical
-      if (curve > 0.08 && normalized[0].x < centerX && normalized[0].y < 0.3 && hasVertical) {
+      // P: curva + vertical, começando à esquerda
+      if (curveScore > 0.06 && isVertical && normalized[0].x < 0.4) {
         return 'P';
       }
 
-      // W: múltiplos picos baixos
-      if (curve > 0.15 && hasVertical && normalized.some(p => p.y > 0.5)) {
+      // W: múltiplas ondas, bem amplo
+      if (curveScore > 0.12 && isWide && isVertical) {
         return 'W';
       }
 
@@ -196,31 +169,54 @@
       strokePoints = [];
     });
 
-    // Resize
     window.addEventListener('resize', () => {
-      camera.aspect = window.innerWidth / window.innerHeight;
-      camera.updateProjectionMatrix();
-      renderer.setSize(window.innerWidth, window.innerHeight);
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
     });
 
-    // Animação
-    function animate() {
-      requestAnimationFrame(animate);
+    function drawWormhole() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.strokeStyle = '#00ffff';
+      ctx.lineWidth = 1.5;
 
-      const time = Date.now() * 0.0005;
+      // Desenhar anéis do wormhole
+      for (let i = 0; i < ringCount; i++) {
+        const z = (i - ringCount / 2 + time * 8) % ringCount;
+        const normalizedZ = (z + ringCount / 2) / ringCount;
 
-      lines.forEach((item, i) => {
-        item.line.position.z = item.initialZ + time * 15;
+        // Raio cresce para frente
+        const baseRadius = 50 + normalizedZ * 300;
 
-        if (item.line.position.z > 30) {
-          item.line.position.z -= ringCount * 0.5;
+        // Opacidade: mais clara no fundo, mais escura na frente
+        const opacity = Math.max(0.1, 1 - Math.abs(normalizedZ - 0.5) * 2);
+        ctx.globalAlpha = opacity;
+
+        ctx.beginPath();
+
+        for (let j = 0; j <= segmentsPerRing; j++) {
+          const angle = (j / segmentsPerRing) * Math.PI * 2;
+
+          // Adicionar pequena oscilação para efeito mais vivo
+          const waveAmount = Math.sin(angle * 4 + time * 2) * 0.05;
+          const radius = baseRadius * (1 + waveAmount);
+
+          const x = centerX + Math.cos(angle) * radius;
+          const y = centerY + Math.sin(angle) * radius;
+
+          if (j === 0) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
         }
 
-        const opacity = 0.3 + 0.7 * Math.abs(Math.sin(item.line.position.z * 0.3));
-        item.line.material.opacity = opacity;
-      });
+        ctx.stroke();
+      }
 
-      renderer.render(scene, camera);
+      ctx.globalAlpha = 1;
+    }
+
+    function animate() {
+      time += 0.016; // ~60fps
+      drawWormhole();
+      requestAnimationFrame(animate);
     }
 
     animate();
