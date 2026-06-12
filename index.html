@@ -19,8 +19,9 @@
   <script src="three.min.js"></script>
   <script>
     const scene = new THREE.Scene();
-    // Fog hides the far end of the loop so the tunnel reads as infinite depth.
-    scene.fog = new THREE.FogExp2(0x000000, 0.045);
+    // Fog hides the far folds of the loop so you only ever see the continuous
+    // corridor ahead -> reads as endless depth, no detached pieces floating.
+    scene.fog = new THREE.FogExp2(0x000000, 0.05);
 
     const camera = new THREE.PerspectiveCamera(90, window.innerWidth / window.innerHeight, 0.1, 1000);
     const BASE_FOV = 90;
@@ -32,14 +33,18 @@
     document.body.appendChild(renderer.domElement);
 
     // ---------- tunnel path (closed loop = truly infinite, never restarts) ----------
-    // Big, highly displaced control points -> very sinuous, sharply curving centreline.
-    const CTRL_POINTS = 28;
+    // Large-scale winding loop: a wide base ring (R0) so the tunnel never folds
+    // back onto itself within view distance, plus strong sine terms for very
+    // sinuous, sharply curving turns. Tuned so the nearest non-local fold sits
+    // ~85 units away -> hidden by fog, leaving only the continuous corridor ahead.
+    const CTRL_POINTS = 40;
+    const R0 = 340;
     const pathPoints = [];
     for (let i = 0; i < CTRL_POINTS; i++) {
       const a = (i / CTRL_POINTS) * Math.PI * 2;
-      const x = Math.cos(a) * 90 + Math.sin(a * 3) * 55 + Math.cos(a * 6) * 30;
-      const y = Math.sin(a) * 90 + Math.cos(a * 4) * 55 + Math.sin(a * 7) * 30;
-      const z = Math.sin(a * 2) * 80 + Math.cos(a * 5) * 45 + Math.sin(a * 9) * 22;
+      const x = Math.cos(a) * R0 + Math.sin(a * 3) * 80 + Math.cos(a * 5) * 45;
+      const y = Math.sin(a) * R0 + Math.cos(a * 3) * 80 + Math.sin(a * 5) * 45;
+      const z = Math.sin(a * 1.5) * 120 + Math.cos(a * 2.5) * 70;
       pathPoints.push(new THREE.Vector3(x, y, z));
     }
 
@@ -48,9 +53,9 @@
     const CURVE_LENGTH = curve.getLength();
 
     // ---------- tube geometry built as clean rings + rails ----------
-    const TUBULAR = 700;   // rings along the length
-    const RADIAL = 24;     // segments around each ring
-    const TUBE_RADIUS = 4.0;
+    const TUBULAR = 1400;  // rings along the length (dense -> smooth over long curve)
+    const RADIAL = 28;     // segments around each ring
+    const TUBE_RADIUS = 14.0; // wide enough to clearly fly *inside* the corridor
 
     const frames = curve.computeFrenetFrames(TUBULAR, true);
     const positions = [];
@@ -100,7 +105,7 @@
 
     // ---------- camera travel along the curve ----------
     let travel = 0;                 // 0..1 position along the closed loop
-    const MOVE_SPEED = 5;           // world units per frame
+    const MOVE_SPEED = 6;           // world units per frame
     const tStep = MOVE_SPEED / CURVE_LENGTH;
 
     const camPos = new THREE.Vector3();
