@@ -18,6 +18,19 @@
 <body>
   <script src="three.min.js"></script>
   <script>
+    // Canvas para desenho de gesto
+    const drawCanvas = document.createElement('canvas');
+    drawCanvas.id = 'draw-canvas';
+    drawCanvas.style.position = 'fixed';
+    drawCanvas.style.top = '0';
+    drawCanvas.style.left = '0';
+    drawCanvas.style.zIndex = '100';
+    drawCanvas.style.pointerEvents = 'auto';
+    document.body.appendChild(drawCanvas);
+    drawCanvas.width = window.innerWidth;
+    drawCanvas.height = window.innerHeight;
+    const drawCtx = drawCanvas.getContext('2d');
+
     const scene = new THREE.Scene();
     scene.fog = new THREE.FogExp2(0x000000, 0.012);
 
@@ -109,25 +122,94 @@
 
     function finish() {
       const c = recognize(normalize(stroke));
-      if (c === 'P') window.location.href = 'pixel-lab.html';
-      else if (c === 'W') window.location.href = 'simulador-wb-xt30ii.html';
+      console.log('Recognized:', c, 'Stroke points:', stroke.length);
+
+      // Clear drawing canvas
+      drawCtx.clearRect(0, 0, drawCanvas.width, drawCanvas.height);
+
+      if (c === 'P') {
+        console.log('Navigating to pixel-lab.html');
+        window.location.href = 'pixel-lab.html';
+      } else if (c === 'W') {
+        console.log('Navigating to simulador-wb-xt30ii.html');
+        window.location.href = 'simulador-wb-xt30ii.html';
+      }
       stroke = [];
     }
 
-    const el = renderer.domElement;
-    el.addEventListener('mousedown', e => { drawing = true; stroke = [{ x: e.clientX, y: e.clientY }]; lastX = e.clientX; lastY = e.clientY; });
-    el.addEventListener('mousemove', e => {
-      if (!drawing) return;
-      if (Math.hypot(e.clientX - lastX, e.clientY - lastY) > TH) { stroke.push({ x: e.clientX, y: e.clientY }); lastX = e.clientX; lastY = e.clientY; }
+    // Event listeners on draw canvas (on top, so they capture first)
+    drawCanvas.addEventListener('mousedown', e => {
+      drawing = true;
+      stroke = [{ x: e.clientX, y: e.clientY }];
+      lastX = e.clientX;
+      lastY = e.clientY;
     });
-    el.addEventListener('mouseup', () => { if (drawing) { drawing = false; finish(); } });
-    el.addEventListener('touchstart', e => { const t = e.touches[0]; drawing = true; stroke = [{ x: t.clientX, y: t.clientY }]; lastX = t.clientX; lastY = t.clientY; });
-    el.addEventListener('touchmove', e => {
-      if (!drawing) return; e.preventDefault();
+
+    drawCanvas.addEventListener('mousemove', e => {
+      if (!drawing) return;
+      const dx = e.clientX - lastX;
+      const dy = e.clientY - lastY;
+      if (Math.hypot(dx, dy) > TH) {
+        stroke.push({ x: e.clientX, y: e.clientY });
+        lastX = e.clientX;
+        lastY = e.clientY;
+        // Draw line
+        drawCtx.strokeStyle = '#00ff00';
+        drawCtx.lineWidth = 3;
+        drawCtx.lineCap = 'round';
+        drawCtx.lineJoin = 'round';
+        drawCtx.beginPath();
+        drawCtx.moveTo(stroke[stroke.length - 2]?.x || e.clientX, stroke[stroke.length - 2]?.y || e.clientY);
+        drawCtx.lineTo(e.clientX, e.clientY);
+        drawCtx.stroke();
+      }
+    });
+
+    drawCanvas.addEventListener('mouseup', () => {
+      if (drawing) {
+        drawing = false;
+        finish();
+      }
+    });
+
+    drawCanvas.addEventListener('touchstart', e => {
+      e.preventDefault();
       const t = e.touches[0];
-      if (Math.hypot(t.clientX - lastX, t.clientY - lastY) > TH) { stroke.push({ x: t.clientX, y: t.clientY }); lastX = t.clientX; lastY = t.clientY; }
+      drawing = true;
+      stroke = [{ x: t.clientX, y: t.clientY }];
+      lastX = t.clientX;
+      lastY = t.clientY;
     }, { passive: false });
-    el.addEventListener('touchend', () => { if (drawing) { drawing = false; finish(); } });
+
+    drawCanvas.addEventListener('touchmove', e => {
+      if (!drawing) return;
+      e.preventDefault();
+      const t = e.touches[0];
+      const dx = t.clientX - lastX;
+      const dy = t.clientY - lastY;
+      if (Math.hypot(dx, dy) > TH) {
+        stroke.push({ x: t.clientX, y: t.clientY });
+        lastX = t.clientX;
+        lastY = t.clientY;
+        // Draw line
+        drawCtx.strokeStyle = '#00ff00';
+        drawCtx.lineWidth = 3;
+        drawCtx.lineCap = 'round';
+        drawCtx.lineJoin = 'round';
+        drawCtx.beginPath();
+        drawCtx.moveTo(stroke[stroke.length - 2]?.x || t.clientX, stroke[stroke.length - 2]?.y || t.clientY);
+        drawCtx.lineTo(t.clientX, t.clientY);
+        drawCtx.stroke();
+      }
+    }, { passive: false });
+
+    drawCanvas.addEventListener('touchend', e => {
+      e.preventDefault();
+      if (drawing) {
+        drawing = false;
+        finish();
+      }
+    }, { passive: false });
 
     window.addEventListener('resize', () => {
       camera.aspect = window.innerWidth / window.innerHeight;
