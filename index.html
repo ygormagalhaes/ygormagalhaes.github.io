@@ -91,46 +91,20 @@
     const tunnel = new THREE.LineSegments(geo, mat);
     scene.add(tunnel);
 
-    // ---------- color wave + distortion ----------
+    // ---------- color wave animation ----------
     let colorWaveOffset = 0;
-    let distortionAmount = 0;
-    let isSwipingNow = false;
 
     function updateTunnelEffects() {
-      const pos_arr = geo.attributes.position.array;
       const colors_arr = geo.attributes.color.array;
 
       for (let i = 0; i < RINGS; i++) {
-        const z = -i * SPACING;
         const depth = i / RINGS;
 
         // Onda de cor psicadélica
         const hueShift = (depth + colorWaveOffset * 0.5 + i * 0.02) % 1;
 
-        // Distorção do túnel sincronizada com swipe
-        const distortionFreq = 4;
-        const distortWave = Math.sin(i * 0.08 + distortionAmount * 2) * distortionAmount;
-
         for (let j = 0; j < SEG; j++) {
           const vertexIdx = (i * SEG + j) * 3;
-          const origIdx = (i * SEG + j) * 3;
-
-          // Buscar coordenadas originais
-          const origX = originalPositions[origIdx];
-          const origY = originalPositions[origIdx + 1];
-          const origZ = originalPositions[origIdx + 2];
-
-          // Aplicar distorção
-          const angle = (j / SEG) * Math.PI * 2;
-          const radiusScale = 1 + distortWave * Math.sin(angle * distortionFreq);
-
-          const dx = Math.cos(angle) * RADIUS * radiusScale;
-          const dy = Math.sin(angle) * RADIUS * radiusScale;
-
-          // Atualizar posição com distorção
-          pos_arr[vertexIdx] = dx + Math.sin(i * 0.03) * 4;
-          pos_arr[vertexIdx + 1] = dy + Math.cos(i * 0.025) * 3;
-          pos_arr[vertexIdx + 2] = origZ;
 
           // Cores psicadélicas dinâmicas
           const hue = (0.55 + hueShift * 0.5) % 1;
@@ -143,80 +117,59 @@
           colors_arr[vertexIdx + 2] = c.b;
         }
       }
-      geo.attributes.position.needsUpdate = true;
       geo.attributes.color.needsUpdate = true;
     }
 
-    // ---------- line detection ----------
-    let isDrawing = false;
-    let startY = 0;
-    let lastLineTime = 0;
-    const MIN_HEIGHT = window.innerHeight * 0.5;
-    const LINE_TIMEOUT = 1500;
+    // ---------- acelerômetro/movimento abrupto ----------
+    let lastAccelX = 0;
+    let lastAccelY = 0;
+    let lastAccelZ = 0;
+    let accelHistory = [];
+    const ACCEL_HISTORY_SIZE = 20;
+    const MOVEMENT_THRESHOLD = 35; // m/s² - movimento abrupto
+    const NAVIGATION_COOLDOWN = 2000; // 2 segundos entre navegações
+    let lastNavigationTime = 0;
 
-    function startLine(e) {
-      const y = e.touches ? e.touches[0].clientY : e.clientY;
-      isDrawing = true;
-      isSwipingNow = true;
-      startY = y;
-      colorWaveOffset = 0;
-      distortionAmount = 0;
-    }
+    if (window.DeviceMotionEvent) {
+      window.addEventListener('devicemotion', (e) => {
+        const accel = e.acceleration;
+        if (!accel) return;
 
-    function endLine(e) {
-      if (!isDrawing) return;
-      isDrawing = false;
-      isSwipingNow = false;
-      distortionAmount = 0;
+        const ax = accel.x || 0;
+        const ay = accel.y || 0;
+        const az = accel.z || 0;
 
-      const y = e.touches ? e.changedTouches[0].clientY : e.clientY;
-      const distance = Math.abs(y - startY);
+        // Calcular magnitude da aceleração
+        const magnitude = Math.sqrt(ax * ax + ay * ay + az * az);
 
-      if (distance >= MIN_HEIGHT) {
-        const now = Date.now();
-        const timeSinceLastLine = now - lastLineTime;
+        // Manter histórico
+        accelHistory.push({ x: ax, y: ay, z: az, mag: magnitude, time: Date.now() });
+        if (accelHistory.length > ACCEL_HISTORY_SIZE) accelHistory.shift();
 
-        if (timeSinceLastLine < LINE_TIMEOUT) {
-          console.log('Double line - navigate to WB');
-          window.location.href = 'wb-simulator.html';
-        } else {
-          lastLineTime = now;
-          console.log('Single line - waiting 1500ms');
-
-          setTimeout(() => {
-            if ((Date.now() - lastLineTime) >= LINE_TIMEOUT && !isSwipingNow) {
-              console.log('Timeout - navigate to Pixel Lab');
+        // Detectar movimento abrupto
+        if (magnitude > MOVEMENT_THRESHOLD) {
+          const now = Date.now();
+          if (now - lastNavigationTime > NAVIGATION_COOLDOWN) {
+            // Movimento para direita (+X) -> WB
+            if (ax > 20) {
+              console.log('Rapid right movement - navigate to WB');
+              lastNavigationTime = now;
+              window.location.href = 'wb-simulator.html';
+            }
+            // Movimento para esquerda (-X) -> Pixel Lab
+            else if (ax < -20) {
+              console.log('Rapid left movement - navigate to Pixel Lab');
+              lastNavigationTime = now;
               window.location.href = 'pixel-lab.html';
             }
-          }, LINE_TIMEOUT);
+          }
         }
-      }
+
+        lastAccelX = ax;
+        lastAccelY = ay;
+        lastAccelZ = az;
+      });
     }
-
-    function onSwipeMove(e) {
-      if (!isSwipingNow) return;
-      const y = e.touches ? e.touches[0].clientY : e.clientY;
-      const distance = Math.abs(y - startY);
-      const normalizedDist = Math.min(1, distance / window.innerHeight);
-
-      colorWaveOffset = normalizedDist;
-      distortionAmount = normalizedDist * 0.8;
-      updateTunnelEffects();
-    }
-
-    const el = renderer.domElement;
-    el.addEventListener('mousedown', startLine);
-    el.addEventListener('mousemove', onSwipeMove);
-    el.addEventListener('mouseup', endLine);
-    el.addEventListener('touchstart', startLine, { passive: true });
-    el.addEventListener('touchmove', onSwipeMove, { passive: true });
-    el.addEventListener('touchend', endLine, { passive: true });
-
-    window.addEventListener('resize', () => {
-      camera.aspect = window.innerWidth / window.innerHeight;
-      camera.updateProjectionMatrix();
-      renderer.setSize(window.innerWidth, window.innerHeight);
-    });
 
     // ---------- giroscópio ----------
     let gyroX = 0, gyroY = 0;
@@ -235,18 +188,18 @@
       }, true);
     }
 
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
     // ---------- animation loop @ 60fps ----------
     const SPEED = 0.45;
     const GYRO_SCALE = 1;
-    let frameTime = 0;
-    let lastFrameTime = performance.now();
 
     function animate() {
       requestAnimationFrame(animate);
-
-      const now = performance.now();
-      frameTime = now - lastFrameTime;
-      lastFrameTime = now;
 
       // Movimento da câmera
       camera.position.z -= SPEED;
@@ -257,15 +210,13 @@
       camera.position.y = gyroX * GYRO_SCALE;
       camera.lookAt(0, 0, camera.position.z - 10);
 
-      // Rotação do túnel com movimento fluido
+      // Rotação do túnel
       tunnel.rotation.z += 0.0015;
 
-      // Animação suave se não estiver em swipe (para manter vibrante)
-      if (!isSwipingNow) {
-        const baseWave = Math.sin(performance.now() * 0.0003) * 0.1;
-        colorWaveOffset = baseWave;
-        updateTunnelEffects();
-      }
+      // Animação contínua de cores
+      const baseWave = Math.sin(performance.now() * 0.0003) * 0.1;
+      colorWaveOffset = baseWave;
+      updateTunnelEffects();
 
       renderer.render(scene, camera);
     }
