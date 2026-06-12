@@ -34,7 +34,7 @@
     document.body.appendChild(renderer.domElement);
 
     // ---------- tunnel mesh with distortion ----------
-    const RINGS = 140;
+    const RINGS = 300; // aumentado para seamless
     const SEG = 96;
     const SPACING = 1.8;
     const RADIUS = 6.5;
@@ -221,6 +221,7 @@
 
     // ---------- animation loop @ 60fps ----------
     const SPEED = 1.2; // velocidade rápida de voo (tobogã)
+    let cameraZGlobal = 0; // posição global para tracking contínuo
 
     function animate() {
       requestAnimationFrame(animate);
@@ -229,12 +230,14 @@
       // com leve influência do giroscópio
       camera.position.x = gyroY * 0.3;
       camera.position.y = gyroX * 0.3;
-      camera.position.z -= SPEED; // voa para frente rapidamente
 
-      // Wrap da câmera quando passa pelo fim do túnel
-      if (camera.position.z <= -RINGS * SPACING) {
-        camera.position.z += RINGS * SPACING;
-      }
+      // Avançar continuamente
+      cameraZGlobal -= SPEED;
+
+      // Posição local da câmera dentro do túnel (wraps infinitamente)
+      const wrapDistance = RINGS * SPACING;
+      const localZ = ((cameraZGlobal % wrapDistance) + wrapDistance) % wrapDistance;
+      camera.position.z = -localZ;
 
       // Olhar para frente no túnel
       camera.lookAt(0, 0, camera.position.z - 15);
