@@ -131,7 +131,7 @@
 
     // ---------- giroscópio / acelerômetro ----------
     let gyroX = 0, gyroY = 0;
-    const gyroSmoothing = 0.15; // suavização do movimento
+    const gyroSmoothing = 0.12; // suavização do movimento
 
     if (window.DeviceOrientationEvent) {
       window.addEventListener('deviceorientation', (e) => {
@@ -140,19 +140,20 @@
         const beta = e.beta || 0;  // -90 a 90
         const gamma = e.gamma || 0; // -180 a 180
 
-        // converter para intervalo usado na câmera
-        gyroY = gyroY * (1 - gyroSmoothing) + (gamma / 45) * gyroSmoothing; // -1 a 1 (aprox)
-        gyroX = gyroX * (1 - gyroSmoothing) + (beta / 45) * gyroSmoothing;   // -1 a 1 (aprox)
+        // mapeamento direto: 30 graus = deslocamento de 30 graus no buraco
+        // sensibilidade 1:1 em unidades de mundo
+        gyroY = gyroY * (1 - gyroSmoothing) + (gamma / 30) * gyroSmoothing; // direto proporcional
+        gyroX = gyroX * (1 - gyroSmoothing) + (beta / 30) * gyroSmoothing;   // direto proporcional
 
-        // clampar
-        gyroX = Math.max(-1, Math.min(1, gyroX));
-        gyroY = Math.max(-1, Math.min(1, gyroY));
+        // clampar para evitar movimento extremo
+        gyroX = Math.max(-3, Math.min(3, gyroX));
+        gyroY = Math.max(-3, Math.min(3, gyroY));
       }, true);
     }
 
     // ---------- loop ----------
     const SPEED = 0.45;
-    const GYRO_SCALE = 4; // quanto o giroscópio move a câmera
+    const GYRO_SCALE = 1.5; // escala final de sensibilidade
     let t = 0;
     function animate() {
       requestAnimationFrame(animate);
@@ -163,6 +164,7 @@
       if (camera.position.z <= -SPACING) camera.position.z += SPACING;
 
       // posição da câmera controlada pelo giroscópio (em vez de balanço constante)
+      // giroscópio de 30 graus = deslocamento de ~30 graus no buraco
       camera.position.x = gyroY * GYRO_SCALE;
       camera.position.y = gyroX * GYRO_SCALE;
       camera.lookAt(0, 0, camera.position.z - 10);
