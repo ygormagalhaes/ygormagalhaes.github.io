@@ -3,226 +3,193 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Ygor Magalhães</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+  <title>GLITCH</title>
   <style>
-    :root {
-      --bg: #0e0e10;
-      --panel: #18181c;
-      --line: #2a2a30;
-      --text: #e8e6e0;
-      --muted: #7a7a82;
-      --accent: #d6ff3f;
-      --green: #86c440;
-    }
-
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-
-    html, body {
-      background: var(--bg);
-      color: var(--text);
-      font-family: 'Archivo', system-ui, sans-serif;
-      font-weight: 500;
-      line-height: 1.6;
-    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
 
     body {
+      background: #000;
       min-height: 100dvh;
-      padding: 40px 20px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-
-    .container {
-      max-width: 900px;
-      width: 100%;
-    }
-
-    header {
-      text-align: center;
-      margin-bottom: 60px;
-      padding-bottom: 30px;
-      border-bottom: 1px solid var(--line);
-    }
-
-    .logo {
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 14px;
-      letter-spacing: 0.2em;
-      text-transform: uppercase;
-      color: var(--green);
-      font-weight: 700;
-      margin-bottom: 20px;
-    }
-
-    h1 {
-      font-size: clamp(32px, 5vw, 48px);
-      font-weight: 700;
-      letter-spacing: -0.01em;
-      margin-bottom: 16px;
-    }
-
-    .subtitle {
-      color: var(--muted);
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 14px;
-      letter-spacing: 0.05em;
-    }
-
-    .projects {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-      gap: 24px;
-      margin-top: 40px;
-    }
-
-    .project-card {
-      background: var(--panel);
-      border: 1px solid var(--line);
-      border-radius: 12px;
-      padding: 28px;
-      transition: all 0.2s ease;
-      text-decoration: none;
-      color: inherit;
       display: flex;
       flex-direction: column;
-      gap: 16px;
+      overflow: hidden;
+      font-family: monospace;
     }
 
-    .project-card:hover {
-      border-color: var(--accent);
-      background: #1f1f24;
-      transform: translateY(-2px);
-    }
-
-    .project-icon {
-      font-size: 32px;
-      width: 48px;
-      height: 48px;
+    .glitch-container {
+      flex: 1;
+      position: relative;
+      background: #0a0a0a;
       display: flex;
       align-items: center;
       justify-content: center;
-      background: rgba(214, 255, 63, 0.08);
-      border-radius: 8px;
-      border: 1px solid rgba(214, 255, 63, 0.2);
-    }
-
-    .project-card h2 {
-      font-size: 20px;
-      font-weight: 700;
-      letter-spacing: -0.01em;
-    }
-
-    .project-card p {
-      color: var(--muted);
-      font-size: 14px;
-      line-height: 1.6;
-      flex: 1;
-    }
-
-    .project-meta {
-      display: flex;
-      gap: 12px;
       flex-wrap: wrap;
-      margin-top: auto;
+      gap: 0;
+      padding: 20px;
     }
 
-    .tag {
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 11px;
-      text-transform: uppercase;
-      letter-spacing: 0.1em;
-      background: rgba(132, 196, 64, 0.1);
-      color: var(--green);
-      padding: 4px 10px;
-      border-radius: 4px;
-      border: 1px solid rgba(132, 196, 64, 0.3);
+    .glitch-block {
+      background: #ff00ff;
+      position: absolute;
+      opacity: 0.9;
+      animation: glitch-move 3s infinite;
     }
 
-    .cta {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      color: var(--accent);
-      font-weight: 600;
-      font-size: 14px;
-      margin-top: 8px;
+    .glitch-block:nth-child(1) {
+      width: 120px;
+      height: 80px;
+      top: 10%;
+      left: 5%;
+      background: #ff1493;
+      animation-delay: 0s;
+      clip-path: polygon(0 0, 85% 0, 100% 15%, 100% 100%, 15% 100%, 0 85%);
     }
 
-    .cta::after {
-      content: "→";
-      transition: transform 0.2s ease;
+    .glitch-block:nth-child(2) {
+      width: 90px;
+      height: 110px;
+      top: 25%;
+      right: 8%;
+      background: #d946ef;
+      animation-delay: 0.5s;
+      clip-path: polygon(10% 0, 100% 0, 90% 100%, 0 100%);
     }
 
-    .project-card:hover .cta::after {
-      transform: translateX(4px);
+    .glitch-block:nth-child(3) {
+      width: 140px;
+      height: 100px;
+      bottom: 15%;
+      left: 12%;
+      background: #ff006e;
+      animation-delay: 1s;
+      clip-path: polygon(0 10%, 100% 0, 100% 90%, 0 100%);
     }
 
-    footer {
-      text-align: center;
-      margin-top: 60px;
-      padding-top: 30px;
-      border-top: 1px solid var(--line);
-      color: var(--muted);
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 12px;
+    .glitch-block:nth-child(4) {
+      width: 110px;
+      height: 95px;
+      bottom: 20%;
+      right: 15%;
+      background: #c71585;
+      animation-delay: 0.3s;
+      clip-path: polygon(5% 0, 95% 5%, 100% 95%, 0 100%);
     }
 
-    @media (max-width: 768px) {
-      body {
-        padding: 30px 16px;
+    .glitch-block:nth-child(5) {
+      width: 130px;
+      height: 85px;
+      top: 40%;
+      left: 35%;
+      background: #ff1493;
+      animation-delay: 0.7s;
+      clip-path: polygon(0 0, 100% 10%, 95% 100%, 0 90%);
+    }
+
+    .glitch-block:nth-child(6) {
+      width: 100px;
+      height: 120px;
+      top: 8%;
+      right: 25%;
+      background: #da70d6;
+      animation-delay: 0.2s;
+      clip-path: polygon(10% 0, 100% 5%, 90% 100%, 0 95%);
+    }
+
+    .glitch-block:nth-child(7) {
+      width: 115px;
+      height: 90px;
+      bottom: 10%;
+      left: 50%;
+      background: #ff006e;
+      animation-delay: 0.9s;
+      clip-path: polygon(0 15%, 100% 0, 100% 85%, 0 100%);
+    }
+
+    .glitch-block:nth-child(8) {
+      width: 125px;
+      height: 105px;
+      top: 55%;
+      right: 5%;
+      background: #d946ef;
+      animation-delay: 0.4s;
+      clip-path: polygon(5% 0, 100% 8%, 95% 100%, 0 92%);
+    }
+
+    @keyframes glitch-move {
+      0%, 100% { transform: translate(0, 0) rotate(0deg); }
+      25% { transform: translate(-3px, 2px) rotate(0.5deg); }
+      50% { transform: translate(2px, -3px) rotate(-0.5deg); }
+      75% { transform: translate(-1px, 1px) rotate(0.3deg); }
+    }
+
+    .footer-nav {
+      position: fixed;
+      bottom: 30px;
+      width: 100%;
+      display: flex;
+      justify-content: center;
+      gap: 60px;
+      z-index: 100;
+    }
+
+    .nav-link {
+      font-size: 48px;
+      font-weight: 900;
+      color: #ff1493;
+      text-decoration: none;
+      cursor: pointer;
+      transition: all 0.1s ease;
+      font-family: monospace;
+      text-shadow: 2px 2px 0 #d946ef, 4px 4px 0 #c71585;
+      letter-spacing: 8px;
+    }
+
+    .nav-link:hover {
+      transform: translate(-2px, -2px);
+      color: #d946ef;
+      text-shadow: 4px 4px 0 #ff1493, 8px 8px 0 #ff006e;
+    }
+
+    .nav-link:nth-child(1) { color: #ff1493; }
+    .nav-link:nth-child(2) { color: #d946ef; }
+
+    @media (max-width: 640px) {
+      .glitch-block {
+        display: none;
       }
 
-      header {
-        margin-bottom: 40px;
+      .glitch-block:nth-child(1),
+      .glitch-block:nth-child(2),
+      .glitch-block:nth-child(5) {
+        display: block;
       }
 
-      .projects {
-        grid-template-columns: 1fr;
+      .footer-nav {
+        gap: 40px;
+      }
+
+      .nav-link {
+        font-size: 36px;
+        text-shadow: 1px 1px 0 #d946ef, 2px 2px 0 #c71585;
       }
     }
   </style>
 </head>
 <body>
-  <div class="container">
-    <header>
-      <div class="logo">YGOR.DEV</div>
-      <h1>Ferramentas & Projetos</h1>
-      <p class="subtitle">Experimentos e utilitários para fotografia e design</p>
-    </header>
+  <div class="glitch-container">
+    <div class="glitch-block"></div>
+    <div class="glitch-block"></div>
+    <div class="glitch-block"></div>
+    <div class="glitch-block"></div>
+    <div class="glitch-block"></div>
+    <div class="glitch-block"></div>
+    <div class="glitch-block"></div>
+    <div class="glitch-block"></div>
+  </div>
 
-    <section class="projects">
-      <!-- Pixel Lab -->
-      <a href="pixel-lab.html" class="project-card">
-        <div class="project-icon">🎨</div>
-        <h2>Pixel Lab</h2>
-        <p>Ferramenta interativa para pixelizar imagens com controle total sobre tamanho, formato dos pixels, dithering e espaçamento.</p>
-        <div class="project-meta">
-          <span class="tag">Canvas</span>
-          <span class="tag">Imagens</span>
-        </div>
-        <div class="cta">Abrir ferramenta</div>
-      </a>
-
-      <!-- White Balance Simulator -->
-      <a href="wb-simulator.html" class="project-card">
-        <div class="project-icon">📷</div>
-        <h2>WB Simulator</h2>
-        <p>Simulador de correção de White Balance da Fujifilm X-T30 II. Explore presets, ajuste Kelvin e color shift em tempo real.</p>
-        <div class="project-meta">
-          <span class="tag">Fujifilm</span>
-          <span class="tag">Fotografia</span>
-        </div>
-        <div class="cta">Abrir simulador</div>
-      </a>
-    </section>
-
-    <footer>
-      <p>Desenvolvido com cuidado. Código fonte disponível no <a href="https://github.com/ygormagalhaes/ygormagalhaes.github.io" style="color: var(--accent); text-decoration: none;">GitHub</a>.</p>
-    </footer>
+  <div class="footer-nav">
+    <a href="pixel-lab.html" class="nav-link">1</a>
+    <a href="wb-simulator.html" class="nav-link">2</a>
   </div>
 </body>
 </html>
